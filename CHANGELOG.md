@@ -1,3 +1,13 @@
+## [1.3.3](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.3.2...v1.3.3) (2026-07-14)
+
+
+### Bug Fixes
+
+* removed post install ([cc2012f](https://github.com/CoCreate-app/CoCreate-acme/commit/cc2012f8ada625665074ecbaad14b895358a3ae7))
+* semantic version handling. Reorganize .gitignore for improved clarity and structure ([6e69e47](https://github.com/CoCreate-app/CoCreate-acme/commit/6e69e47e1643255a623bee33279320d0a825ce4f))
+* update module export to ES6 syntax in release.config.js ([5833855](https://github.com/CoCreate-app/CoCreate-acme/commit/58338552088e727bb7abbeb77107dcb87f82bfa5))
+* update package.json to use ESM and restructure server/client entry points ([6eb6796](https://github.com/CoCreate-app/CoCreate-acme/commit/6eb679673260922698716bf5e5e35a5044a1dbd1))
+
 ## [1.3.2](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.3.1...v1.3.2) (2025-09-06)
 
 
