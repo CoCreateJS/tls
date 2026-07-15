@@ -53,20 +53,6 @@ export async function init(parentServer) {
     try {
         server = parentServer;
 
-        // Apply references directly to the server object to fulfill the interface contract
-        if (server) {
-            server.certificate = {
-                init,
-                load,
-                sniCallback,
-                request,
-                get,
-                check,
-                isValid,
-                set
-            };
-        }
-
         await exec("sudo mkdir -p /etc/certificates");
         await exec("sudo chmod 777 /etc/certificates");
 
@@ -107,7 +93,7 @@ export async function init(parentServer) {
         if (server) {
             server.https = https.createServer({
                 SNICallback: sniCallback
-            });
+            }, (req, res) => server.handleEdgeRequest(req, res));
         }
     } catch (err) {
         console.error("[@cocreate/acme] Error initializing certificate client:", err);
@@ -246,9 +232,19 @@ export async function get(host, organization_id) {
 
     if (!server || !server.crud) return false;
 
-    let organization = await server.crud.getOrganization({ host, organization_id });
-    if (organization.error) return false;
-    if (!organization_id) organization_id = organization._id;
+    let organization;
+    try {
+        organization = await server.crud.getOrganization({ host, organization_id });
+    } catch (error) {
+        console.error(`[@cocreate/acme] Failed database lookup during organization query for ${host}:`, error.message);
+        return false;
+    }
+
+    // Safety check: Prevent TypeErrors if the DB yields undefined or returns an explicit error
+    if (!organization || organization.error) {
+        console.warn(`[@cocreate/acme] Organization query for host "${host}" returned empty or error state.`);
+        return false;
+    }
 
     if (organization.host) {
         for (let i = 0; i < organization.host.length; i++) {
