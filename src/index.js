@@ -13,17 +13,10 @@
  *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
- *
  ********************************************************************************/
-
-// Commercial Licensing Information:
-// For commercial use of this software without the copyleft provisions of the AGPLv3,
-// you must obtain a commercial license from CoCreate LLC.
-// For details, visit <https://cocreate.app/licenses/> or contact us at sales@cocreate.app.
 
 import { Client, forge } from "acme-client";
 import fs from "fs";
-import https from "https";
 import tls from "tls";
 import { promisify } from "node:util";
 import { exec as childExec } from "node:child_process";
@@ -87,14 +80,8 @@ export async function init(parentServer) {
                 console.error("[@cocreate/acme] Error creating account credentials:", error.message);
             }
         }
-
-        // Dynamically instantiate the HTTPS server with the SNI Callback context 
-        // and bind it directly onto the core server object.
-        if (server) {
-            server.https = https.createServer({
-                SNICallback: sniCallback
-            }, (req, res) => server.handleEdgeRequest(req, res));
-        }
+        
+           
     } catch (err) {
         console.error("[@cocreate/acme] Error initializing certificate client:", err);
         throw err;
@@ -309,7 +296,7 @@ export function isValid(expires) {
 }
 
 /**
- * Writes dynamic credentials to disk and triggers an update on the host ingress config.
+ * Writes dynamic credentials to disk and triggers an update on the host ingress config if applicable.
  */
 export function set(host, expires, organization_id, hostKeyPath, cert, key) {
     if (hostKeyPath) {
@@ -318,7 +305,8 @@ export function set(host, expires, organization_id, hostKeyPath, cert, key) {
         fs.writeFileSync(`${hostKeyPath}private-key.pem`, key);
     }
 
-    if (server && server.ingress) {
+    // Safely bypassed if Nginx is entirely removed/omitted from this deployment
+    if (server && server.ingress && typeof server.ingress.createServer === "function") {
         server.ingress.createServer(host);
     }
     certificates[host] = { expires, organization_id };
