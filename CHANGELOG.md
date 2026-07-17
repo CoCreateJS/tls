@@ -1,3 +1,15 @@
+# [1.4.0](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.3.3...v1.4.0) (2026-07-17)
+
+
+### Bug Fixes
+
+* improve error handling and remove redundant server reference assignments in init function ([69831fe](https://github.com/CoCreate-app/CoCreate-acme/commit/69831fee351f103e60579b34bb915fbed655b3a1))
+
+
+### Features
+
+* update automated workflow and release configuration for improved semantic release handling ([90145c1](https://github.com/CoCreate-app/CoCreate-acme/commit/90145c12f6421d03cbb66d8f4b7c29891b1d2ef0))
+
 ## [1.3.3](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.3.2...v1.3.3) (2026-07-14)
 
 
