@@ -1,3 +1,11 @@
+## [1.4.1](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.4.0...v1.4.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* bump dependencies ([a6c9134](https://github.com/CoCreate-app/CoCreate-acme/commit/a6c9134248057e7c99472f7c59f1a6b5db961784))
+* update acme-client dependency version to ^5.4.0 ([31be66c](https://github.com/CoCreate-app/CoCreate-acme/commit/31be66c2cfecb9fb82efd8e99d0e076fc4a178d5))
+
 # [1.4.0](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.3.3...v1.4.0) (2026-07-17)
 
 
