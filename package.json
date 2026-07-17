@@ -41,6 +41,6 @@
   "type": "module",
   "main": "./src/index.js",
   "dependencies": {
-    "acme-client": "^5.0.0"
+    "acme-client": "^5.4.0"
   }
 }
