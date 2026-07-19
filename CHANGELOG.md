@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.5.0...v1.5.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* set default branch to main ([383f061](https://github.com/CoCreate-app/CoCreate-acme/commit/383f061a286d5f0016c33c28acca72c79af3edf9))
+
 # [1.5.0](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.4.1...v1.5.0) (2026-07-19)
 
 
