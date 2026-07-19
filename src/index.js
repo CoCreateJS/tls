@@ -18,24 +18,59 @@
 import { Client, forge } from "acme-client";
 import fs from "fs";
 import tls from "tls";
-import { promisify } from "node:util";
-import { exec as childExec } from "node:child_process";
-
-const exec = promisify(childExec);
+import path from "path";
+import dns from "node:dns/promises";
 
 // ==========================================
 // Module-Level Sandbox State (ESM Singleton Container)
 // ==========================================
 let server = null; // Direct reference used across all module functions
-const certificates = {};
-const email = "ssl@cocreate.app";
-const keyPath = "/etc/certificates/";
+const email = "ssl@cocreatejs.com";
+
+// Local storage: No sudo required, keeps files isolated to the application runtime
+const keyPath = path.join(process.cwd(), "certificates") + path.sep;
+
 let client;
 const hosts = {};
+const certificates = {};
+
+// ==========================================
+// SNI Memory Management
+// ==========================================
+const secureContextCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Background Garbage Collection for inactive contexts
+setInterval(() => {
+    const now = Date.now();
+    for (const [domain, data] of secureContextCache.entries()) {
+        if (now - data.timestamp > CACHE_TTL) {
+            secureContextCache.delete(domain);
+        }
+    }
+}, 60 * 1000).unref(); // Unref prevents this timer from blocking a clean process exit
 
 const DAYS = Math.floor(Math.random() * 7);
 const HOURS = Math.floor(Math.random() * 24);
 const MINUTES = Math.floor(Math.random() * 60);
+
+/**
+ * Executes a DNS lookup to ensure the domain actually points to this infrastructure
+ * before requesting a certificate, preventing ACME rate limit bans.
+ */
+async function verifyDnsBeforeAcme(domain) {
+    try {
+        const addresses = await dns.resolve4(domain);
+        // If the server knows its own IP, strictly match it. Otherwise, ensure it resolves to *something*.
+        if (server && server.ip && addresses.length > 0) {
+            return addresses.includes(server.ip);
+        }
+        return addresses.length > 0;
+    } catch (err) {
+        console.warn(`[@cocreate/acme] DNS pre-flight failed for ${domain}. Skipping Let's Encrypt request.`);
+        return false;
+    }
+}
 
 /**
  * Bootstraps the ACME account keys, directories, and instantiates the
@@ -46,8 +81,10 @@ export async function init(parentServer) {
     try {
         server = parentServer;
 
-        await exec("sudo mkdir -p /etc/certificates");
-        await exec("sudo chmod 777 /etc/certificates");
+        // Native folder creation with secure, owner-only read/write/execute permissions
+        if (!fs.existsSync(keyPath)) {
+            fs.mkdirSync(keyPath, { recursive: true, mode: 0o700 });
+        }
 
         const accountKeyPath = `${keyPath}account.pem`;
         let accountKey = "";
@@ -56,7 +93,7 @@ export async function init(parentServer) {
         if (!fs.existsSync(accountKeyPath)) {
             accountKey = await forge.createPrivateKey();
             isNewAccount = true;
-            fs.writeFileSync(accountKeyPath, accountKey);
+            fs.writeFileSync(accountKeyPath, accountKey, { mode: 0o600 });
         } else {
             accountKey = fs.readFileSync(accountKeyPath, "utf8");
         }
@@ -80,8 +117,6 @@ export async function init(parentServer) {
                 console.error("[@cocreate/acme] Error creating account credentials:", error.message);
             }
         }
-        
-           
     } catch (err) {
         console.error("[@cocreate/acme] Error initializing certificate client:", err);
         throw err;
@@ -107,18 +142,32 @@ export function load(domain) {
 }
 
 /**
- * Core SNI Handshake implementation. Resolves domains dynamically and loads TLS Context.
+ * Core SNI Handshake implementation. Resolves domains dynamically and caches TLS Contexts in RAM.
  * @param {string} domain - Incoming target SNI hostname
  * @param {Function} cb - Resolution completion callback
  */
 export async function sniCallback(domain, cb) {
     try {
-        // Verify domain authorization
+        // 1. Check RAM Cache First (Sub-millisecond response)
+        if (secureContextCache.has(domain)) {
+            const cacheEntry = secureContextCache.get(domain);
+            cacheEntry.timestamp = Date.now(); // Renew TTL
+            return cb(null, cacheEntry.context);
+        }
+
+        // 2. Fallback to Disk / Database / ACME creation
         const isValidDomain = await check(domain);
         
         if (isValidDomain) {
             const credentials = load(domain);
             const sslContext = tls.createSecureContext(credentials);
+            
+            // 3. Store Compiled C++ Context in RAM
+            secureContextCache.set(domain, {
+                context: sslContext,
+                timestamp: Date.now()
+            });
+            
             cb(null, sslContext);
         } else {
             cb(new Error(`[@cocreate/acme] Unauthorized secure request for domain: ${domain}`));
@@ -137,7 +186,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         const hostKeyPath = `${keyPath}${host}/`;
         
         if (!fs.existsSync(hostKeyPath)) {
-            fs.mkdirSync(hostKeyPath, { recursive: true });
+            fs.mkdirSync(hostKeyPath, { recursive: true, mode: 0o700 });
         }
 
         const domains = wildcard ? [host, `*.${host}`] : [host];
@@ -254,6 +303,13 @@ export async function get(host, organization_id) {
         if (!hostPosition && hostPosition !== 0) return false;
     }
 
+    // --- PRE-FLIGHT DNS CHECK ---
+    // Prevent contacting ACME if the domain's DNS is not yet pointing to this node
+    const dnsValid = await verifyDnsBeforeAcme(host);
+    if (!dnsValid) {
+        return false;
+    }
+
     return await request(host, hostPosition, hostObject, organization_id, false);
 }
 
@@ -296,13 +352,14 @@ export function isValid(expires) {
 }
 
 /**
- * Writes dynamic credentials to disk and triggers an update on the host ingress config if applicable.
+ * Writes dynamic credentials to disk securely and updates local tracking state.
  */
 export function set(host, expires, organization_id, hostKeyPath, cert, key) {
     if (hostKeyPath) {
-        if (!fs.existsSync(hostKeyPath)) fs.mkdirSync(hostKeyPath, { recursive: true });
-        fs.writeFileSync(`${hostKeyPath}fullchain.pem`, cert);
-        fs.writeFileSync(`${hostKeyPath}private-key.pem`, key);
+        if (!fs.existsSync(hostKeyPath)) fs.mkdirSync(hostKeyPath, { recursive: true, mode: 0o700 });
+        // Enforce owner-only read/write permissions for sensitive key data
+        fs.writeFileSync(`${hostKeyPath}fullchain.pem`, cert, { mode: 0o600 });
+        fs.writeFileSync(`${hostKeyPath}private-key.pem`, key, { mode: 0o600 });
     }
 
     // Safely bypassed if Nginx is entirely removed/omitted from this deployment
