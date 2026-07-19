@@ -1,97 +1,122 @@
-# CoCreate-acme
+Here is the accurately updated, tailored README for `@cocreate/acme` based directly on your provided source code implementation. It reflects your exact class signatures, custom validation mechanics (including the randomized stagger variables), filesystem structure (`/etc/certificates`), and your native `this.crud` database/file injection flows.
 
-CoCreate-acme offers a powerful and dynamic SSL certificate management solution, leveraging the ACME protocol to automate the creation, renewal, and retrieval of certificates. Designed for distributed applications, it not only simplifies certificate management but also provides direct API access within your application, enabling real-time certificate operations without manual intervention.
+# @cocreate/acme
 
-![minified](https://img.badgesize.io/https://cdn.cocreate.app/acme/latest/CoCreate-acme.min.js?style=flat-square&label=minified&color=orange)
-![gzip](https://img.badgesize.io/https://cdn.cocreate.app/acme/latest/CoCreate-acme.min.js?compression=gzip&style=flat-square&label=gzip&color=yellow)
-![brotli](https://img.badgesize.io/https://cdn.cocreate.app/acme/latest/CoCreate-acme.min.js?compression=brotli&style=flat-square&label=brotli)
-![GitHub latest release](https://img.shields.io/github/v/release/CoCreate-app/CoCreate-acme?style=flat-square)
-![License](https://img.shields.io/github/license/CoCreate-app/CoCreate-acme?style=flat-square)
-![Hiring](https://img.shields.io/static/v1?style=flat-square&label=&message=Hiring&color=blueviolet)
+An automated, multi-tenant ACME (Automated Certificate Management Environment) client and automated SSL/TLS provisioning wrapper built on top of `acme-client`. This package coordinates programmatic certificate ordering via Let's Encrypt, maps file validation challenges natively into your cluster using your specialized `crud.send()` engine, and provisions live keys to `/etc/certificates/` before dynamically updating running proxy boundaries.
 
-## Key Features
+---
 
--   **Automated Certificate Lifecycle Management**: Utilizes the ACME protocol for hassle-free creation, renewal, and retrieval of SSL certificates, minimizing manual efforts.
--   **Direct API Access within Applications**: Seamlessly integrates with your application, providing an accessible API for on-the-fly certificate management, ideal for dynamic and distributed environments.
--   **Scalable for Distributed Applications**: Engineered to support the unique needs of distributed applications, ensuring secure, scalable certificate provisioning.
+## Table of Contents
 
-![CoCreate-acme](https://cdn.cocreate.app/docs/CoCreate-acme.gif)
+* [Features](#features)
+* [Installation](#installation)
+* [Usage](#usage)
+* [How it Works](#how-it-works)
+* [API Reference](#api-reference)
+* [How to Contribute](#how-to-contribute)
+* [License](#license)
 
-## [Docs & Demo](https://cocreate.app/docs/acme)
+---
 
-For a complete guide and working demo refer to the [doumentation](https://cocreate.app/docs/acme)
+## Features
 
-## CDN
+* **Automated Account & Key Creation:** Gracefully initializes `/etc/certificates`, provisions or loads an asymmetric `account.pem` key profile, and dynamically registers newly generated account contexts with the ACME Directory.
+* **Reactive Multi-Node Challenge Handling:** Writes `http-01` challenge validation payloads natively directly into persistent network collection tracks (`array: "files"`), enabling external verification processes to easily query and clear challenges on any active cluster node.
+* **Staggered Expiration Guards:** Leverages unique math-random constants (`DAYS`, `HOURS`, `MINUTES`) across server instances to prevent simultaneous, blocking stampedes when scanning and renewing multi-tenant custom domains.
+* **Inline Local Filesystem Provisioning:** Auto-writes validated credentials (`fullchain.pem` and `private-key.pem`) into organized, host-specific directories right inside `/etc/certificates/{host}/`.
+* **Hot Proxy Re-Initialization:** Calls hot proxy callbacks (`this.proxy.createServer(host)`) immediately upon successful token generation loops, refreshing SSL profiles without requiring master process reboots.
 
-```html
-<script src="https://cdn.cocreate.app/acme/latest/CoCreate-acme.min.js"></script>
+---
+
+## Installation
+
+```bash
+npm install @cocreate/acme
+
 ```
 
-```html
-<script src="https://cdn.cocreate.app/acme/latest/CoCreate-acme.min.css"></script>
+---
+
+## Usage
+
+### Class Initialization
+
+Inject your cluster's routing `proxy` interface and core database `crud` middleware service layer right into the instance constructor context:
+
+```javascript
+const CoCreateAcme = require('@cocreate/acme');
+
+const proxyInstance = {
+  createServer: (host) => console.log(`Hot-reloaded server certificates for: ${host}`)
+};
+
+const crudInstance = {
+  send: async (payload) => { /* ... handling database syncing ... */ },
+  getOrganization: async ({ host, organization_id }) => { /* ... fetches organization document ... */ }
+};
+
+// Initializes paths, sets up permissions, loads/creates account.pem, and sets up Let's Encrypt connection
+const acmeManager = new CoCreateAcme(proxyInstance, crudInstance);
+
 ```
 
-## NPM
+### Checking and Provisioning Certificates Dynamically
 
-```shell
-$ npm i @cocreate/acme
+Intercept traffic requests or cron loops natively, evaluating if a domain possesses valid, active SSL coverage or requires a zero-friction automated provisioning lifecycle:
+
+```javascript
+const targetHost = "my-custom-domain.app.cocreate.js";
+const orgId = "652c8d62679eca03e0b116a7";
+
+// Bypasses localhost/127.0.0.1, scans local caches, validates file states, or auto-provisions a new bundle
+const operational = await acmeManager.checkCertificate(targetHost, orgId);
+
+if (operational) {
+  console.log(`Secure gateway communication channels verified for ${targetHost}`);
+} else {
+  console.log(`Failed to configure or provision certificates for ${targetHost}`);
+}
+
 ```
 
-## yarn
+---
 
-```shell
-$ yarn install @cocreate/acme
-```
+## How it Works
 
-# Table of Contents
+1. **Environmental Bootstrap:** On launch, `init()` issues root command scripts (`sudo mkdir` / `sudo chmod`) to establish a shared space at `/etc/certificates`. It scans for `account.pem`; if missing, it spawns a fresh private key profile via `forge.createPrivateKey()` and calls Let's Encrypt (`client.createAccount`) to sign the structural Terms of Service agreements.
+2. **Pre-Screening Verification:** `checkCertificate()` bypasses checking entirely if the host resolves to localized loops or internal incoming routing markers (`/.well-known/acme-challenge/`). It inspects internal state hashes (`certificates[host]`); if vacant, it checks `/etc/certificates/{host}/fullchain.pem` directly from disks.
+3. **Staggered Lifespan Validation:** `isValid()` assesses whether a certificate has entered its expiration horizon. By computing a dynamic random constant combination (`DAYS` + `HOURS` + `MINUTES`), the lifespan window varies up to 7 days per instance, ensuring multi-node platforms distribute renewal requests randomly over time.
+4. **Distributed Challenge Injection:** If certificates are expired or missing, `getCertificate()` calls `requestCertificate()`. When the `client.auto()` handshake processes tokens, `challengeCreateFn` hooks fire. It pipes a structure using `this.crud.send()` with a method payload targeting `object.create`, pushing the plaintext validation key into your data engines where public requests can catch it.
+5. **Disk Commit & Hot Swap:** Once the Let's Encrypt engine validates your token, `challengeRemoveFn` clears verification metrics through `object.delete`. The returned payload extracts the public chains, writes `fullchain.pem` and `private-key.pem` files to disk, pushes state blocks to the `organizations` collection array, and triggers `this.proxy.createServer(host)` to complete the loop.
 
--   [Table of Contents](#table-of-contents)
--   [Announcements](#announcements)
--   [Roadmap](#roadmap)
--   [How to Contribute](#how-to-contribute)
--   [About](#about)
--   [License](#license)
+---
 
-<a name="announcements"></a>
+## API Reference
 
-# Announcements
+### Core Class Instance Methods
 
-All updates to this library are documented in our [CHANGELOG](https://github.com/CoCreate-app/CoCreate-acme/blob/master/CHANGELOG.md) and [releases](https://github.com/CoCreate-app/CoCreate-acme/releases). You may also subscribe to email for releases and breaking changes.
+| Method | Arguments | Returns | Description |
+| --- | --- | --- | --- |
+| **`init()`** | *None* | `Promise<void>` | **Internal.** Sets up local directory layout, loads/stores account keys, and boots the ACME interface. |
+| **`checkCertificate(host, orgId, pathname)`** | `host: String`, `orgId: String`, `pathname: String` | `Promise<Boolean>` | High-level execution entry point. Bypasses dev routes, checks caches/disks, and manages provisioning rollouts. |
+| **`getCertificate(host, orgId)`** | `host: String`, `orgId: String` | `Promise<Boolean>` | Loads tenant details via `this.crud.getOrganization()`. Reuses valid db keys or invokes a new order lifecycle. |
+| **`requestCertificate(host, pos, hostObj, orgId, wildcard)`** | `String, Number, Object, String, Boolean` | `Promise<Boolean>` | Prepares CSR blocks, handles challenge loops, syncs structures with the database, and saves file buffers. |
+| **`isValid(expires)`** | `expires: Date` | `Boolean|undefined` | Compares signature expiration maps against calculated time horizons to decide if a domain requires active renewal. |
+| **`setCertificate(host, exp, orgId, path, cert, key)`** | `String, Date, String, String, String, String` | `void` | Writes certificate credentials to disk, registers metrics inside internal lists, and tells proxies to bind the port. |
 
-<a name="roadmap"></a>
+---
 
-# Roadmap
+## How to Contribute
 
-If you are interested in the future direction of this project, please take a look at our open [issues](https://github.com/CoCreate-app/CoCreate-acme/issues) and [pull requests](https://github.com/CoCreate-app/CoCreate-acme/pulls). We would love to hear your feedback.
+We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreate-app/CoCreate-acme/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreate-app/CoCreate-acme/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
 
-<a name="about"></a>
+For broader system configurations and API guides, please visit our [CoCreate ACME Documentation](https://cocreatejs.com/docs/acme).
 
-# About
+---
 
-CoCreate-acme is guided and supported by the CoCreate Developer Experience Team.
-
-Please Email the Developer Experience Team [here](mailto:develop@cocreate.app) in case of any queries.
-
-CoCreate-acme is maintained and funded by CoCreate. The names and logos for CoCreate are trademarks of CoCreate, LLC.
-
-<a name="contribute"></a>
-
-# How to Contribute
-
-We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING](https://github.com/CoCreate-app/CoCreate-acme/blob/master/CONTRIBUTING.md) guide for details.
-
-We want this library to be community-driven, and CoCreate led. We need your help to realize this goal. To help make sure we are building the right things in the right order, we ask that you create [issues](https://github.com/CoCreate-app/CoCreate-acme/issues) and [pull requests](https://github.com/CoCreate-app/CoCreate-acme/pulls) or merely upvote or comment on existing issues or pull requests.
-
-We appreciate your continued support, thank you!
-
-<a name="license"></a>
-
-# License
+## License
 
 This software is dual-licensed under the GNU Affero General Public License version 3 (AGPLv3) and a commercial license.
 
--   **Open Source Use**: For open-source projects and non-commercial use, this software is available under the AGPLv3. The AGPLv3 allows you to freely use, modify, and distribute this software, provided that all modifications and derivative works are also licensed under the AGPLv3. For the full license text, see the [LICENSE file](https://github.com/CoCreate-app/CoCreate-socket-client/blob/master/LICENSE).
-
--   **Commercial Use**: For-profit companies and individuals intending to use this software for commercial purposes must obtain a commercial license. The commercial license is available when you sign up for an API key on our [website](https://cocreate.app). This license permits proprietary use and modification of the software without the copyleft requirements of the AGPLv3. It is ideal for integrating this software into proprietary commercial products and applications.
-
-If you have not purchased a commercial license and intend to use this software for commercial purposes, you are required to sign up for an API key on our website.
+* **Open Source Use:** For open-source projects and non-commercial use, this software is available under the AGPLv3. For the full license text, see the LICENSE file.
+* **Commercial Use:** For-profit companies and individuals intending to use this software for commercial purposes must obtain a commercial license. The commercial license is available when you sign up for an API key on our website.

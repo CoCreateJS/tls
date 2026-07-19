@@ -1,20 +1,23 @@
 {
   "name": "@cocreate/acme",
   "version": "1.5.1",
-  "description": "Dynamic SSL certificate management leveraging the ACME protocol, designed for direct API accessibility within applications. Automates certificate creation, renewal, and retrieval, ideal for distributed applications requiring real-time, secure certificate operations.",
+  "description": "An automated multi-tenant ACME SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
   "keywords": [
-    "acme",
-    "ssl",
-    "certificates",
-    "automation",
-    "api",
-    "distributed-applications",
-    "security",
     "cocreate",
-    "low-code-framework",
-    "cocreate-framework",
-    "low-code",
-    "javascript-framework"
+    "cocreate-app",
+    "acme",
+    "acme-client",
+    "ssl",
+    "tls",
+    "certificates",
+    "letsencrypt",
+    "http-01",
+    "dns-01",
+    "multi-tenant",
+    "automation",
+    "proxy",
+    "reverse-proxy",
+    "security"
   ],
   "publishConfig": {
     "access": "public"
