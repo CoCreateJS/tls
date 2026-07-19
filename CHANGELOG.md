@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.4.1...v1.5.0) (2026-07-19)
+
+
+### Features
+
+* enhance DNS verification and secure file handling in ACME client ([0c92815](https://github.com/CoCreate-app/CoCreate-acme/commit/0c92815879b5a390b1b4697a8d530294bb78b1dd))
+
 ## [1.4.1](https://github.com/CoCreate-app/CoCreate-acme/compare/v1.4.0...v1.4.1) (2026-07-17)
 
 
