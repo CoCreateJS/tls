@@ -208,7 +208,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
                             directory: "acme-challenge",
                             host: [authz.identifier.value],
                             name: challenge.token,
-                            organization_id: "652c8d62679eca03e0b116a7",
+                            organization_id: organization_id,
                             path: "/.well-known/acme-challenge/",
                             pathname: `/.well-known/acme-challenge/${challenge.token}`,
                             public: "true",
@@ -280,6 +280,12 @@ export async function get(host, organization_id) {
     if (!organization || organization.error) {
         console.warn(`[@cocreate/acme] Organization query for host "${host}" returned empty or error state.`);
         return false;
+    }
+
+    // Dynamic Resolution: If organization_id is not passed (e.g., during a blind SNI callback),
+    // extract it directly from the resolved organization record to enforce correct database routing.
+    if (!organization_id && organization._id) {
+        organization_id = organization._id;
     }
 
     if (organization.host) {
