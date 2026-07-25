@@ -21,13 +21,9 @@ import tls from "tls";
 import path from "path";
 import dns from "node:dns/promises";
 
-// ==========================================
-// Module-Level Sandbox State (ESM Singleton Container)
-// ==========================================
 let server = null; // Direct reference used across all module functions
 const email = "ssl@cocreatejs.com";
 
-// Local storage: No sudo required, keeps files isolated to the application runtime
 const keyPath = path.join(process.cwd(), "certificates") + path.sep;
 
 let client;
