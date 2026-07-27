@@ -24,7 +24,7 @@ import dns from "node:dns/promises";
 let server = null; // Direct reference used across all module functions
 const email = "ssl@cocreatejs.com";
 
-const keyPath = path.join(process.cwd(), "certificates") + path.sep;
+const keyPath = path.join(process.cwd(), ".certificates") + path.sep;
 
 let client;
 const hosts = {};
