@@ -1,6 +1,6 @@
 {
   "name": "@cocreate/acme",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "An automated multi-tenant ACME SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
   "keywords": [
     "cocreate",
