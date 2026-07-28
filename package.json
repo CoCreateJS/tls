@@ -43,6 +43,14 @@
   },
   "type": "module",
   "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./distribution": "./dist/mongodb.js",
+    "./installer": "./installer/mongodb.installer.js"
+  },
+  "devDependencies": {
+    "@cocreate/webpack": "^1.6.0"
+  },
   "dependencies": {
     "acme-client": "^5.4.0"
   }
