@@ -44,7 +44,7 @@
   "type": "module",
   "main": "./src/index.js",
   "devDependencies": {
-    "@cocreate/webpack": "^1.6.2"
+    "@cocreate/webpack": "^1.7.0"
   },
   "dependencies": {
     "acme-client": "^5.4.0"
