@@ -1,32 +1,434 @@
 /********************************************************************************
- * Copyright (C) 2023 CoCreate and Contributors.
+ * Copyright (C) 2026 CoCreate and Contributors.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * Licensed under GNU AGPLv3.
  ********************************************************************************/
 
-import { Client, forge } from "acme-client";
-import fs from "fs";
-import tls from "tls";
-import path from "path";
+import crypto from "node:crypto";
+import { Buffer } from "node:buffer";
+import fs from "node:fs";
+import tls from "node:tls";
+import path from "node:path";
 import dns from "node:dns/promises";
+
+/**
+ * Standard Let's Encrypt Directory URLs
+ */
+export const ACME_DIRECTORY = {
+    LETSENCRYPT_PRODUCTION: "https://acme-v02.api.letsencrypt.org/directory",
+    LETSENCRYPT_STAGING: "https://acme-staging-v02.api.letsencrypt.org/directory"
+};
+
+export const directory = ACME_DIRECTORY;
+
+/**
+ * Global environment toggle configuration.
+ * Can be changed at startup or dynamically via options or env vars.
+ */
+export const config = {
+    // Default to production unless explicitly set to staging via env or options
+    isProduction: process.env.ACME_ENV !== "staging" && process.env.ACME_STAGING !== "true"
+};
+
+/**
+ * Resolves directory URL based on options, config, or env variables
+ * @param {Object} [options] - Optional override parameters
+ * @returns {string} Fully qualified ACME directory URL
+ */
+export function getDirectoryUrl(options = {}) {
+    if (options.directoryUrl) return options.directoryUrl;
+    
+    const isProd = options.production ?? (options.staging !== undefined ? !options.staging : config.isProduction);
+    return isProd ? ACME_DIRECTORY.LETSENCRYPT_PRODUCTION : ACME_DIRECTORY.LETSENCRYPT_STAGING;
+}
+
+/**
+ * Converts String or Buffer into a Base64URL string (RFC 7515)
+ */
+function toBase64Url(input) {
+    const buf = Buffer.isBuffer(input)
+        ? input
+        : Buffer.from(input, typeof input === "string" ? "utf8" : undefined);
+    return buf.toString("base64url");
+}
+
+/**
+ * Calculates RFC 7638 SHA-256 JWK Thumbprint
+ */
+function getJwkThumbprint(jwk) {
+    const orderedJwk = jwk.kty === "RSA"
+        ? { e: jwk.e, kty: jwk.kty, n: jwk.n }
+        : { crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y };
+
+    const hash = crypto.createHash("sha256");
+    hash.update(JSON.stringify(orderedJwk));
+    return toBase64Url(hash.digest());
+}
+
+function derTag(tag, content) {
+    let lenBytes;
+    const len = content.length;
+
+    if (len < 128) {
+        lenBytes = Buffer.from([len]);
+    } else if (len < 256) {
+        lenBytes = Buffer.from([0x81, len]);
+    } else if (len < 65536) {
+        lenBytes = Buffer.from([0x82, (len >> 8) & 0xff, len & 0xff]);
+    } else {
+        lenBytes = Buffer.from([0x83, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff]);
+    }
+
+    return Buffer.concat([Buffer.from([tag]), lenBytes, content]);
+}
+
+function derSequence(items) {
+    return derTag(0x30, Buffer.concat(items));
+}
+
+function derSet(items) {
+    return derTag(0x31, Buffer.concat(items));
+}
+
+function derOID(oidString) {
+    const parts = oidString.split(".").map(Number);
+    const bytes = [parts[0] * 40 + parts[1]];
+
+    for (let i = 2; i < parts.length; i++) {
+        let val = parts[i];
+        const stack = [];
+        stack.push(val & 0x7f);
+        while ((val >>= 7) > 0) {
+            stack.push((val & 0x7f) | 0x80);
+        }
+        bytes.push(...stack.reverse());
+    }
+
+    return derTag(0x06, Buffer.from(bytes));
+}
+
+/**
+ * Generates a DER-encoded PKCS#10 Certificate Signing Request (CSR)
+ * supporting single and multi-domain (SAN) configurations.
+ */
+export function createCSR(privateKeyInput, domains) {
+    if (!domains || domains.length === 0) {
+        throw new Error("At least one domain is required to generate a CSR");
+    }
+
+    const privateKey = typeof privateKeyInput === "string"
+        ? crypto.createPrivateKey(privateKeyInput)
+        : privateKeyInput;
+
+    const primaryDomain = domains[0];
+    const pubKeyDetails = crypto.createPublicKey(privateKey);
+    const spkiDer = pubKeyDetails.export({ type: "spki", format: "der" });
+
+    // Subject Attribute: Common Name (CN = primaryDomain)
+    const subject = derSequence([
+        derSet([
+            derSequence([
+                derOID("2.5.4.3"), // CommonName OID
+                derTag(0x0c, Buffer.from(primaryDomain, "utf8")) // UTF8String
+            ])
+        ])
+    ]);
+
+    // Extension Request: Subject Alternative Names (SAN)
+    const sanEntries = domains.map(domain => derTag(0x82, Buffer.from(domain, "utf8"))); // Context primitive [2] dNSName
+    const sanExtension = derSequence([
+        derOID("2.5.29.17"), // subjectAltName OID
+        derTag(0x04, derSequence(sanEntries)) // OCTET STRING containing SAN Sequence
+    ]);
+
+    const extensionsSequence = derSequence([sanExtension]);
+    const attributeExtensionReq = derTag(0xa0, derSequence([
+        derOID("1.2.840.113549.1.9.14"), // extensionRequest OID
+        derSet([extensionsSequence])
+    ]));
+
+    // CertificationRequestInfo structure
+    const certReqInfo = derSequence([
+        derTag(0x02, Buffer.from([0x00])), // Version 0
+        subject,
+        spkiDer,
+        attributeExtensionReq
+    ]);
+
+    // Sign CertificationRequestInfo with Domain Private Key
+    const signer = crypto.createSign("SHA256");
+    signer.update(certReqInfo);
+    const signature = signer.sign(privateKey);
+
+    // Signature Algorithm OID (sha256WithRSAEncryption or ecdsa-with-SHA256)
+    const isEC = privateKey.asymmetricKeyType === "ec";
+    const sigAlgOid = isEC ? "1.2.840.10045.4.3.2" : "1.2.840.113549.1.1.11";
+    const sigAlgorithm = derSequence([
+        derOID(sigAlgOid),
+        isEC ? Buffer.alloc(0) : derTag(0x05, Buffer.alloc(0)) // NULL parameters for RSA
+    ]);
+
+    // PKCS#10 CertificationRequest Sequence
+    const csrDer = derSequence([
+        certReqInfo,
+        sigAlgorithm,
+        derTag(0x03, Buffer.concat([Buffer.from([0x00]), signature])) // BIT STRING
+    ]);
+
+    return toBase64Url(csrDer);
+}
+
+/**
+ * Zero-Dependency Direct ACME Client (RFC 8555)
+ */
+export class NativeAcmeClient {
+    constructor(options = {}) {
+        this.directoryUrl = getDirectoryUrl(options);
+        
+        let accountKey = options.accountKey;
+        if (typeof accountKey === "string") {
+            accountKey = crypto.createPrivateKey(accountKey);
+        } else if (!accountKey) {
+            accountKey = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+        }
+
+        this.accountKey = accountKey;
+        this.accountUrl = null;
+        this.nonce = null;
+        this.directory = null;
+
+        const pubKey = crypto.createPublicKey(this.accountKey);
+        this.jwk = pubKey.export({ format: "jwk" });
+        this.jwkThumbprint = getJwkThumbprint(this.jwk);
+    }
+
+    /**
+     * Initializes directory endpoints and fetches an initial anti-replay nonce
+     */
+    async init() {
+        const res = await fetch(this.directoryUrl);
+        if (!res.ok) {
+            throw new Error(`Failed to fetch ACME Directory (${res.status}): ${await res.text()}`);
+        }
+        this.directory = await res.json();
+        await this.fetchNonce();
+    }
+
+    /**
+     * Retrieves a fresh Replay-Nonce header from the ACME server
+     */
+    async fetchNonce() {
+        const res = await fetch(this.directory.newNonce, { method: "HEAD" });
+        this.nonce = res.headers.get("replay-nonce");
+    }
+
+    /**
+     * Sends an authenticated JWS payload to an ACME endpoint
+     */
+    async postJws(url, payload) {
+        if (!this.nonce) {
+            await this.fetchNonce();
+        }
+
+        // RFC 8555 Requirement: Post-account creation requests MUST use 'kid' (accountUrl) instead of 'jwk'.
+        // Automatically retrieve/verify account URL if calling any non-newAccount endpoint without accountUrl set.
+        if (!this.accountUrl && this.directory && url !== this.directory.newAccount) {
+            await this.createAccount({ termsOfServiceAgreed: true });
+        }
+
+        const isEC = this.accountKey.asymmetricKeyType === "ec";
+        const alg = isEC ? "ES256" : "RS256";
+
+        const header = {
+            alg,
+            nonce: this.nonce,
+            url,
+            ...(this.accountUrl ? { kid: this.accountUrl } : { jwk: this.jwk })
+        };
+
+        const protectedHeader = toBase64Url(JSON.stringify(header));
+        const payloadString = payload !== "" ? toBase64Url(typeof payload === "string" ? payload : JSON.stringify(payload)) : "";
+
+        const signInput = `${protectedHeader}.${payloadString}`;
+        const signer = crypto.createSign(isEC ? "sha256" : "SHA256");
+        signer.update(signInput);
+        const signature = toBase64Url(signer.sign(this.accountKey));
+
+        const body = JSON.stringify({
+            protected: protectedHeader,
+            payload: payloadString,
+            signature
+        });
+
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/jose+json" },
+            body
+        });
+
+        const nextNonce = res.headers.get("replay-nonce");
+        if (nextNonce) {
+            this.nonce = nextNonce;
+        }
+
+        if (!res.ok) {
+            const errorData = await res.clone().json().catch(() => ({}));
+            if (errorData.type === "urn:ietf:params:acme:error:badNonce") {
+                await this.fetchNonce();
+                return this.postJws(url, payload);
+            }
+        }
+
+        return res;
+    }
+
+    /**
+     * Registers or logs in an ACME Account (newAccount)
+     */
+    async createAccount(options = {}) {
+        const payload = {
+            termsOfServiceAgreed: options.termsOfServiceAgreed ?? true,
+            contact: options.email ? (Array.isArray(options.email) ? options.email : [`mailto:${options.email}`]) : undefined
+        };
+
+        const res = await this.postJws(this.directory.newAccount, payload);
+        if (!res.ok && res.status !== 200 && res.status !== 201) {
+            throw new Error(`ACME Account Creation Failed (${res.status}): ${await res.text()}`);
+        }
+
+        this.accountUrl = res.headers.get("location");
+        return await res.json();
+    }
+
+    /**
+     * Submits a new Certificate Order (newOrder)
+     */
+    async createOrder(domains) {
+        const identifiers = domains.map(domain => ({ type: "dns", value: domain }));
+        const res = await this.postJws(this.directory.newOrder, { identifiers });
+
+        if (!res.ok) {
+            throw new Error(`ACME Order Creation Failed (${res.status}): ${await res.text()}`);
+        }
+
+        const orderLocation = res.headers.get("location");
+        const orderData = await res.json();
+        return { ...orderData, url: orderLocation };
+    }
+
+    /**
+     * Retrieves domain authorization details and challenge tokens
+     */
+    async getAuthorizations(order) {
+        const authorizations = [];
+        for (const authUrl of order.authorizations) {
+            const res = await this.postJws(authUrl, "");
+            const authData = await res.json();
+            authorizations.push({ ...authData, url: authUrl });
+        }
+        return authorizations;
+    }
+
+    /**
+     * Computes the HTTP-01 or DNS-01 key authorization token string
+     */
+    getKeyAuthorization(token) {
+        return `${token}.${this.jwkThumbprint}`;
+    }
+
+    /**
+     * Triggers ACME server to verify a challenge (e.g., HTTP-01 or DNS-01)
+     */
+    async verifyChallenge(challengeUrl) {
+        const res = await this.postJws(challengeUrl, {});
+        if (!res.ok) {
+            throw new Error(`Failed to notify ACME of challenge verification (${res.status}): ${await res.text()}`);
+        }
+        return await res.json();
+    }
+
+    /**
+     * Polls an ACME Authorization URL until status is 'valid' or 'invalid'
+     */
+    async pollAuthorization(authUrl, maxAttempts = 15, delayMs = 2000) {
+        for (let i = 0; i < maxAttempts; i++) {
+            const res = await this.postJws(authUrl, "");
+            const authData = await res.json();
+
+            if (authData.status === "valid") {
+                return authData;
+            }
+
+            if (authData.status === "invalid") {
+                const challengeWithError = authData.challenges?.find(c => c.error);
+                const errorDetail = challengeWithError
+                    ? JSON.stringify(challengeWithError.error)
+                    : JSON.stringify(authData);
+                throw new Error(`ACME Authorization failed with status 'invalid': ${errorDetail}`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+
+        throw new Error(`Timed out waiting for ACME Authorization status to reach 'valid'`);
+    }
+
+    /**
+     * Polls the ACME Order URL until status becomes 'ready' or 'valid'
+     */
+    async pollOrder(orderUrl, targetStatus = "ready", maxAttempts = 10, delayMs = 2000) {
+        for (let i = 0; i < maxAttempts; i++) {
+            const res = await this.postJws(orderUrl, "");
+            const orderData = await res.json();
+
+            if (orderData.status === targetStatus || orderData.status === "valid") {
+                return orderData;
+            }
+
+            if (orderData.status === "invalid") {
+                throw new Error(`ACME Order processing failed with status 'invalid': ${JSON.stringify(orderData)}`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+
+        throw new Error(`Timed out waiting for ACME Order status to reach '${targetStatus}'`);
+    }
+
+    /**
+     * Finalizes the order by sending the generated Certificate Signing Request (CSR)
+     */
+    async finalizeOrder(order, domainPrivateKey, domains) {
+        const csrBase64Url = createCSR(domainPrivateKey, domains);
+        const res = await this.postJws(order.finalize, { csr: csrBase64Url });
+
+        if (!res.ok) {
+            throw new Error(`ACME Finalize Order Failed (${res.status}): ${await res.text()}`);
+        }
+
+        return await res.json();
+    }
+
+    /**
+     * Downloads the final issued SSL/TLS PEM Certificate chain
+     */
+    async downloadCertificate(certificateUrl) {
+        const res = await this.postJws(certificateUrl, "");
+        if (!res.ok) {
+            throw new Error(`Failed to download certificate (${res.status}): ${await res.text()}`);
+        }
+        return await res.text();
+    }
+}
+
+// Backward-compatible alias for third-party libraries expecting `Client`
+export const Client = NativeAcmeClient;
 
 let server = null; // Direct reference used across all module functions
 const email = "ssl@cocreatejs.com";
-
 const keyPath = path.join(process.cwd(), ".certificates") + path.sep;
 
-let client;
+let client = null;
 const hosts = {};
 const certificates = {};
 
@@ -69,13 +471,36 @@ async function verifyDnsBeforeAcme(domain) {
 }
 
 /**
+ * Extracts expiration Date from a PEM Certificate using native Node crypto.X509Certificate
+ */
+function readCertificateExpiry(certPem) {
+    try {
+        const x509 = new crypto.X509Certificate(certPem);
+        return new Date(x509.validTo);
+    } catch (err) {
+        console.error("[@cocreate/acme] Failed reading certificate expiry date:", err.message);
+        return null;
+    }
+}
+
+/**
  * Bootstraps the ACME account keys, directories, and instantiates the
  * secure HTTPS server context, attaching it back to the parent server reference.
  * @param {Object} parentServer - Parent CoCreateServer singleton instance
+ * @param {Object} [options] - Optional options ({ production: boolean, staging: boolean, directoryUrl: string })
  */
-export async function init(parentServer) {
+export async function init(parentServer, options = {}) {
     try {
         server = parentServer;
+
+        // Apply top-level options if provided
+        if (options.production !== undefined) config.isProduction = Boolean(options.production);
+        if (options.staging !== undefined) config.isProduction = !options.staging;
+
+        const directoryUrl = getDirectoryUrl(options);
+        const modeName = directoryUrl === ACME_DIRECTORY.LETSENCRYPT_PRODUCTION ? "PRODUCTION" : "STAGING";
+
+        console.log(`[@cocreate/acme] Initializing ACME authority client in ${modeName} mode (${directoryUrl})...`);
 
         // Native folder creation with secure, owner-only read/write/execute permissions
         if (!fs.existsSync(keyPath)) {
@@ -84,34 +509,30 @@ export async function init(parentServer) {
 
         const accountKeyPath = `${keyPath}account.pem`;
         let accountKey = "";
-        let isNewAccount = false;
 
         if (!fs.existsSync(accountKeyPath)) {
-            accountKey = await forge.createPrivateKey();
-            isNewAccount = true;
+            const keyPair = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+            accountKey = keyPair.privateKey.export({ type: "pkcs8", format: "pem" });
             fs.writeFileSync(accountKeyPath, accountKey, { mode: 0o600 });
         } else {
             accountKey = fs.readFileSync(accountKeyPath, "utf8");
         }
 
-        client = new Client({
-            directoryUrl: "https://acme-v02.api.letsencrypt.org/directory",
-            accountKey: accountKey
+        client = new NativeAcmeClient({
+            directoryUrl,
+            accountKey
         });
 
-        if (isNewAccount) {
-            try {
-                await client.createAccount({
-                    termsOfServiceAgreed: true,
-                    contact: [`mailto:${email}`]
-                });
-                console.log("[@cocreate/acme] ACME authority account created successfully!");
-            } catch (error) {
-                try {
-                    fs.unlinkSync(accountKeyPath);
-                } catch (_) {}
-                console.error("[@cocreate/acme] Error creating account credentials:", error.message);
-            }
+        await client.init();
+
+        try {
+            await client.createAccount({
+                termsOfServiceAgreed: true,
+                email
+            });
+            console.log(`[@cocreate/acme] ACME authority account initialized successfully (${modeName})!`);
+        } catch (error) {
+            console.error("[@cocreate/acme] Error initializing account credentials:", error.message);
         }
     } catch (err) {
         console.error("[@cocreate/acme] Error initializing certificate client:", err);
@@ -186,53 +607,77 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         }
 
         const domains = wildcard ? [host, `*.${host}`] : [host];
-        let [key, csr] = await forge.createCsr({ commonName: domains[0], altNames: domains });
-        let challenge_id = "";
+        const domainKeyPair = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+        const domainPrivateKeyPem = domainKeyPair.privateKey.export({ type: "pkcs8", format: "pem" });
 
-        const cert = await client.auto({
-            csr,
-            email: [email],
-            termsOfServiceAgreed: true,
-            challengeCreateFn: async (authz, challenge, keyAuthorization) => {
-                if (challenge.type === "http-01" && server && server.crud) {
-                    const httpChallenge = await server.crud.send({
-                        method: "object.create",
-                        host,
-                        array: "files",
-                        object: {
-                            "content-type": "text/plain",
-                            directory: "acme-challenge",
-                            host: [authz.identifier.value],
-                            name: challenge.token,
-                            organization_id: organization_id,
-                            path: "/.well-known/acme-challenge/",
-                            pathname: `/.well-known/acme-challenge/${challenge.token}`,
-                            public: "true",
-                            src: keyAuthorization
-                        },
-                        organization_id
-                    });
-                    if (httpChallenge?.object?.[0]) challenge_id = httpChallenge.object[0]._id;
+        if (!client) {
+            throw new Error("NativeAcmeClient has not been initialized. Call init() first.");
+        }
+
+        const order = await client.createOrder(domains);
+        const authorizations = await client.getAuthorizations(order);
+
+        for (const auth of authorizations) {
+            if (auth.status === "valid") {
+                continue;
+            }
+
+            const httpChallenge = auth.challenges.find(c => c.type === "http-01") || auth.challenges[0];
+            const keyAuthorization = client.getKeyAuthorization(httpChallenge.token);
+            let challenge_id = "";
+
+            if (httpChallenge.type === "http-01" && server && server.crud) {
+                const httpChallengeRes = await server.crud.send({
+                    method: "object.create",
+                    host,
+                    array: "files",
+                    object: {
+                        "content-type": "text/plain",
+                        directory: "acme-challenge",
+                        host: [auth.identifier.value],
+                        name: httpChallenge.token,
+                        organization_id: organization_id,
+                        path: "/.well-known/acme-challenge/",
+                        pathname: `/.well-known/acme-challenge/${httpChallenge.token}`,
+                        public: "true",
+                        src: keyAuthorization
+                    },
+                    organization_id
+                });
+                if (httpChallengeRes?.object?.[0]) {
+                    challenge_id = httpChallengeRes.object[0]._id;
                 }
-            },
-            challengeRemoveFn: async (authz, challenge, keyAuthorization) => {
-                if (challenge.type === "http-01" && server && server.crud) {
-                    server.crud.send({
+            }
+
+            try {
+                // Request validation from ACME server
+                await client.verifyChallenge(httpChallenge.url);
+
+                // Wait for ACME server to perform HTTP fetch and mark authorization valid
+                await client.pollAuthorization(auth.url);
+            } finally {
+                // Cleanup challenge record ONLY after validation completes (or fails)
+                if (httpChallenge.type === "http-01" && server && server.crud && challenge_id) {
+                    await server.crud.send({
                         method: "object.delete",
                         host,
                         array: "files",
                         object: { _id: challenge_id },
                         organization_id
-                    });
+                    }).catch(err => console.error("[@cocreate/acme] Cleanup challenge file error:", err));
                 }
             }
-        });
+        }
 
-        let expires = await forge.readCertificateInfo(cert);
-        expires = expires.notAfter;
-        
-        set(host, expires, organization_id, hostKeyPath, cert, key);
-        key = key.toString("utf8");
+        const readyOrder = await client.pollOrder(order.url, "ready");
+        await client.finalizeOrder(readyOrder, domainKeyPair.privateKey, domains);
+        const validOrder = await client.pollOrder(order.url, "valid");
+
+        const cert = await client.downloadCertificate(validOrder.certificate);
+        const expires = readCertificateExpiry(cert);
+
+        set(host, expires, organization_id, hostKeyPath, cert, domainPrivateKeyPem);
+        console.log(`[@cocreate/acme] Successfully issued SSL certificate for ${host} (Expires: ${expires})`);
 
         if (server && server.crud) {
             server.crud.send({
@@ -241,7 +686,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
                 array: "organizations",
                 object: {
                     _id: organization_id,
-                    [`host[${hostPosition}]`]: { ...hostObject, name: host, cert, key, expires }
+                    [`host[${hostPosition}]`]: { ...hostObject, name: host, cert, key: domainPrivateKeyPem, expires }
                 },
                 organization_id
             });
@@ -291,11 +736,11 @@ export async function get(host, organization_id) {
                 hostObject = organization.host[i];
                 
                 if (organization.host[i].cert && organization.host[i].key) {
-                    let expires = await forge.readCertificateInfo(organization.host[i].cert);
-                    expires = expires.notAfter;
+                    const expires = readCertificateExpiry(organization.host[i].cert);
                     
                     if (isValid(expires)) {
                         set(host, expires, organization_id, hostKeyPath, organization.host[i].cert, organization.host[i].key);
+                        console.log(`[@cocreate/acme] Successfully loaded certificate for ${host} from database.`);
                         return true;
                     }
                 }
@@ -328,11 +773,11 @@ export async function check(host, organization_id, pathname = "") {
     const hostKeyPath = `${keyPath}${host}/`;
     if (fs.existsSync(`${hostKeyPath}fullchain.pem`)) {
         let cert = fs.readFileSync(`${hostKeyPath}fullchain.pem`, "utf8");
-        let expires = await forge.readCertificateInfo(cert);
-        expires = expires.notAfter;
+        let expires = readCertificateExpiry(cert);
         
         if (isValid(expires)) {
             set(host, expires, organization_id);
+            console.log(`[@cocreate/acme] Successfully verified local SSL certificate for ${host}.`);
             return true;
         }
     }
@@ -345,12 +790,15 @@ export async function check(host, organization_id, pathname = "") {
  * Validates if a certificate has expired based on standard and randomized drift margins.
  */
 export function isValid(expires) {
+    if (!expires) return false;
+    const expiryDate = typeof expires === "string" || typeof expires === "number" ? new Date(expires) : expires;
+
     let currentDate = new Date();
     currentDate.setDate(currentDate.getDate() + DAYS);
     currentDate.setHours(currentDate.getHours() + HOURS);
     currentDate.setMinutes(currentDate.getMinutes() + MINUTES);
 
-    return (expires && currentDate < expires);
+    return (expiryDate && currentDate < expiryDate);
 }
 
 /**
@@ -371,8 +819,36 @@ export function set(host, expires, organization_id, hostKeyPath, cert, key) {
     certificates[host] = { expires, organization_id };
 }
 
+/**
+ * Checks if a PEM certificate string is valid and not expiring within renewDays threshold
+ */
+export function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
+    try {
+        const x509 = new crypto.X509Certificate(certPem);
+        const expiryDate = new Date(x509.validTo);
+        const msPerDay = 1000 * 60 * 60 * 24;
+        const daysRemaining = (expiryDate.getTime() - Date.now()) / msPerDay;
+
+        return daysRemaining > renewDaysBeforeExpiry;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Flexible check function supporting both PEM string checks and options object checks
+ */
+export async function checkCertificate(input, renewDaysBeforeExpiry = 30) {
+    if (typeof input === "string") {
+        return isCertificateValid(input, renewDaysBeforeExpiry);
+    }
+    return false;
+}
+
 // Default export mimics the functional API entry point
 export default {
+    config,
+    getDirectoryUrl,
     init,
     load,
     sniCallback,
@@ -380,5 +856,12 @@ export default {
     get,
     check,
     isValid,
-    set
+    set,
+    NativeAcmeClient,
+    Client: NativeAcmeClient,
+    createCSR,
+    isCertificateValid,
+    checkCertificate,
+    ACME_DIRECTORY,
+    directory: ACME_DIRECTORY
 };
