@@ -14,12 +14,12 @@ import dns from "node:dns/promises";
 /**
  * Standard Let's Encrypt Directory URLs
  */
-export const ACME_DIRECTORY = {
-    LETSENCRYPT_PRODUCTION: "https://acme-v02.api.letsencrypt.org/directory",
-    LETSENCRYPT_STAGING: "https://acme-staging-v02.api.letsencrypt.org/directory"
+export const Certificates_DIRECTORY = {
+    LETSENCRYPT_PRODUCTION: "https://certificates-v02.api.letsencrypt.org/directory",
+    LETSENCRYPT_STAGING: "https://certificates-staging-v02.api.letsencrypt.org/directory"
 };
 
-export const directory = ACME_DIRECTORY;
+export const directory = Certificates_DIRECTORY;
 
 /**
  * Global environment toggle configuration.
@@ -27,19 +27,19 @@ export const directory = ACME_DIRECTORY;
  */
 export const config = {
     // Default to production unless explicitly set to staging via env or options
-    isProduction: process.env.ACME_ENV !== "staging" && process.env.ACME_STAGING !== "true"
+    isProduction: process.env.Certificates_ENV !== "staging" && process.env.Certificates_STAGING !== "true"
 };
 
 /**
  * Resolves directory URL based on options, config, or env variables
  * @param {Object} [options] - Optional override parameters
- * @returns {string} Fully qualified ACME directory URL
+ * @returns {string} Fully qualified Certificates directory URL
  */
 export function getDirectoryUrl(options = {}) {
     if (options.directoryUrl) return options.directoryUrl;
     
     const isProd = options.production ?? (options.staging !== undefined ? !options.staging : config.isProduction);
-    return isProd ? ACME_DIRECTORY.LETSENCRYPT_PRODUCTION : ACME_DIRECTORY.LETSENCRYPT_STAGING;
+    return isProd ? Certificates_DIRECTORY.LETSENCRYPT_PRODUCTION : Certificates_DIRECTORY.LETSENCRYPT_STAGING;
 }
 
 /**
@@ -179,9 +179,9 @@ export function createCSR(privateKeyInput, domains) {
 }
 
 /**
- * Zero-Dependency Direct ACME Client (RFC 8555)
+ * Zero-Dependency Direct Certificates Client (RFC 8555)
  */
-export class NativeAcmeClient {
+export class NativeCertificatesClient {
     constructor(options = {}) {
         this.directoryUrl = getDirectoryUrl(options);
         
@@ -208,14 +208,14 @@ export class NativeAcmeClient {
     async init() {
         const res = await fetch(this.directoryUrl);
         if (!res.ok) {
-            throw new Error(`Failed to fetch ACME Directory (${res.status}): ${await res.text()}`);
+            throw new Error(`Failed to fetch Certificates Directory (${res.status}): ${await res.text()}`);
         }
         this.directory = await res.json();
         await this.fetchNonce();
     }
 
     /**
-     * Retrieves a fresh Replay-Nonce header from the ACME server
+     * Retrieves a fresh Replay-Nonce header from the Certificates server
      */
     async fetchNonce() {
         const res = await fetch(this.directory.newNonce, { method: "HEAD" });
@@ -223,7 +223,7 @@ export class NativeAcmeClient {
     }
 
     /**
-     * Sends an authenticated JWS payload to an ACME endpoint
+     * Sends an authenticated JWS payload to an Certificates endpoint
      */
     async postJws(url, payload) {
         if (!this.nonce) {
@@ -273,7 +273,7 @@ export class NativeAcmeClient {
 
         if (!res.ok) {
             const errorData = await res.clone().json().catch(() => ({}));
-            if (errorData.type === "urn:ietf:params:acme:error:badNonce") {
+            if (errorData.type === "urn:ietf:params:certificates:error:badNonce") {
                 await this.fetchNonce();
                 return this.postJws(url, payload);
             }
@@ -283,7 +283,7 @@ export class NativeAcmeClient {
     }
 
     /**
-     * Registers or logs in an ACME Account (newAccount)
+     * Registers or logs in an Certificates Account (newAccount)
      */
     async createAccount(options = {}) {
         const payload = {
@@ -293,7 +293,7 @@ export class NativeAcmeClient {
 
         const res = await this.postJws(this.directory.newAccount, payload);
         if (!res.ok && res.status !== 200 && res.status !== 201) {
-            throw new Error(`ACME Account Creation Failed (${res.status}): ${await res.text()}`);
+            throw new Error(`Certificates Account Creation Failed (${res.status}): ${await res.text()}`);
         }
 
         this.accountUrl = res.headers.get("location");
@@ -308,7 +308,7 @@ export class NativeAcmeClient {
         const res = await this.postJws(this.directory.newOrder, { identifiers });
 
         if (!res.ok) {
-            throw new Error(`ACME Order Creation Failed (${res.status}): ${await res.text()}`);
+            throw new Error(`Certificates Order Creation Failed (${res.status}): ${await res.text()}`);
         }
 
         const orderLocation = res.headers.get("location");
@@ -337,18 +337,18 @@ export class NativeAcmeClient {
     }
 
     /**
-     * Triggers ACME server to verify a challenge (e.g., HTTP-01 or DNS-01)
+     * Triggers Certificates server to verify a challenge (e.g., HTTP-01 or DNS-01)
      */
     async verifyChallenge(challengeUrl) {
         const res = await this.postJws(challengeUrl, {});
         if (!res.ok) {
-            throw new Error(`Failed to notify ACME of challenge verification (${res.status}): ${await res.text()}`);
+            throw new Error(`Failed to notify Certificates of challenge verification (${res.status}): ${await res.text()}`);
         }
         return await res.json();
     }
 
     /**
-     * Polls an ACME Authorization URL until status is 'valid' or 'invalid'
+     * Polls an Certificates Authorization URL until status is 'valid' or 'invalid'
      */
     async pollAuthorization(authUrl, maxAttempts = 15, delayMs = 2000) {
         for (let i = 0; i < maxAttempts; i++) {
@@ -364,17 +364,17 @@ export class NativeAcmeClient {
                 const errorDetail = challengeWithError
                     ? JSON.stringify(challengeWithError.error)
                     : JSON.stringify(authData);
-                throw new Error(`ACME Authorization failed with status 'invalid': ${errorDetail}`);
+                throw new Error(`Certificates Authorization failed with status 'invalid': ${errorDetail}`);
             }
 
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
 
-        throw new Error(`Timed out waiting for ACME Authorization status to reach 'valid'`);
+        throw new Error(`Timed out waiting for Certificates Authorization status to reach 'valid'`);
     }
 
     /**
-     * Polls the ACME Order URL until status becomes 'ready' or 'valid'
+     * Polls the Certificates Order URL until status becomes 'ready' or 'valid'
      */
     async pollOrder(orderUrl, targetStatus = "ready", maxAttempts = 10, delayMs = 2000) {
         for (let i = 0; i < maxAttempts; i++) {
@@ -386,13 +386,13 @@ export class NativeAcmeClient {
             }
 
             if (orderData.status === "invalid") {
-                throw new Error(`ACME Order processing failed with status 'invalid': ${JSON.stringify(orderData)}`);
+                throw new Error(`Certificates Order processing failed with status 'invalid': ${JSON.stringify(orderData)}`);
             }
 
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
 
-        throw new Error(`Timed out waiting for ACME Order status to reach '${targetStatus}'`);
+        throw new Error(`Timed out waiting for Certificates Order status to reach '${targetStatus}'`);
     }
 
     /**
@@ -403,7 +403,7 @@ export class NativeAcmeClient {
         const res = await this.postJws(order.finalize, { csr: csrBase64Url });
 
         if (!res.ok) {
-            throw new Error(`ACME Finalize Order Failed (${res.status}): ${await res.text()}`);
+            throw new Error(`Certificates Finalize Order Failed (${res.status}): ${await res.text()}`);
         }
 
         return await res.json();
@@ -422,7 +422,7 @@ export class NativeAcmeClient {
 }
 
 // Backward-compatible alias for third-party libraries expecting `Client`
-export const Client = NativeAcmeClient;
+export const Client = NativeCertificatesClient;
 
 let server = null; // Direct reference used across all module functions
 const email = "ssl@cocreatejs.com";
@@ -454,9 +454,9 @@ const MINUTES = Math.floor(Math.random() * 60);
 
 /**
  * Executes a DNS lookup to ensure the domain actually points to this infrastructure
- * before requesting a certificate, preventing ACME rate limit bans.
+ * before requesting a certificate, preventing Certificates rate limit bans.
  */
-async function verifyDnsBeforeAcme(domain) {
+async function verifyDnsBeforeCertificates(domain) {
     try {
         const addresses = await dns.resolve4(domain);
         // If the server knows its own IP, strictly match it. Otherwise, ensure it resolves to *something*.
@@ -465,7 +465,7 @@ async function verifyDnsBeforeAcme(domain) {
         }
         return addresses.length > 0;
     } catch (err) {
-        console.warn(`[@cocreate/acme] DNS pre-flight failed for ${domain}. Skipping Let's Encrypt request.`);
+        console.warn(`[@cocreate/certificates] DNS pre-flight failed for ${domain}. Skipping Let's Encrypt request.`);
         return false;
     }
 }
@@ -478,13 +478,13 @@ function readCertificateExpiry(certPem) {
         const x509 = new crypto.X509Certificate(certPem);
         return new Date(x509.validTo);
     } catch (err) {
-        console.error("[@cocreate/acme] Failed reading certificate expiry date:", err.message);
+        console.error("[@cocreate/certificates] Failed reading certificate expiry date:", err.message);
         return null;
     }
 }
 
 /**
- * Bootstraps the ACME account keys, directories, and instantiates the
+ * Bootstraps the Certificates account keys, directories, and instantiates the
  * secure HTTPS server context, attaching it back to the parent server reference.
  * @param {Object} parentServer - Parent CoCreateServer singleton instance
  * @param {Object} [options] - Optional options ({ production: boolean, staging: boolean, directoryUrl: string })
@@ -498,9 +498,9 @@ export async function init(parentServer, options = {}) {
         if (options.staging !== undefined) config.isProduction = !options.staging;
 
         const directoryUrl = getDirectoryUrl(options);
-        const modeName = directoryUrl === ACME_DIRECTORY.LETSENCRYPT_PRODUCTION ? "PRODUCTION" : "STAGING";
+        const modeName = directoryUrl === Certificates_DIRECTORY.LETSENCRYPT_PRODUCTION ? "PRODUCTION" : "STAGING";
 
-        console.log(`[@cocreate/acme] Initializing ACME authority client in ${modeName} mode (${directoryUrl})...`);
+        console.log(`[@cocreate/certificates] Initializing Certificates authority client in ${modeName} mode (${directoryUrl})...`);
 
         // Native folder creation with secure, owner-only read/write/execute permissions
         if (!fs.existsSync(keyPath)) {
@@ -518,7 +518,7 @@ export async function init(parentServer, options = {}) {
             accountKey = fs.readFileSync(accountKeyPath, "utf8");
         }
 
-        client = new NativeAcmeClient({
+        client = new NativeCertificatesClient({
             directoryUrl,
             accountKey
         });
@@ -530,12 +530,12 @@ export async function init(parentServer, options = {}) {
                 termsOfServiceAgreed: true,
                 email
             });
-            console.log(`[@cocreate/acme] ACME authority account initialized successfully (${modeName})!`);
+            console.log(`[@cocreate/certificates] Certificates authority account initialized successfully (${modeName})!`);
         } catch (error) {
-            console.error("[@cocreate/acme] Error initializing account credentials:", error.message);
+            console.error("[@cocreate/certificates] Error initializing account credentials:", error.message);
         }
     } catch (err) {
-        console.error("[@cocreate/acme] Error initializing certificate client:", err);
+        console.error("[@cocreate/certificates] Error initializing certificate client:", err);
         throw err;
     }
 }
@@ -553,7 +553,7 @@ export function load(domain) {
             cert: fs.readFileSync(`${keyPath}${domain}/fullchain.pem`),
         };
     } catch (error) {
-        console.error(`[@cocreate/acme] Error loading SSL certificates for domain: ${domain}`, error);
+        console.error(`[@cocreate/certificates] Error loading SSL certificates for domain: ${domain}`, error);
         throw error;
     }
 }
@@ -572,7 +572,7 @@ export async function sniCallback(domain, cb) {
             return cb(null, cacheEntry.context);
         }
 
-        // 2. Fallback to Disk / Database / ACME creation
+        // 2. Fallback to Disk / Database / Certificates creation
         const isValidDomain = await check(domain);
         
         if (isValidDomain) {
@@ -587,16 +587,16 @@ export async function sniCallback(domain, cb) {
             
             cb(null, sslContext);
         } else {
-            cb(new Error(`[@cocreate/acme] Unauthorized secure request for domain: ${domain}`));
+            cb(new Error(`[@cocreate/certificates] Unauthorized secure request for domain: ${domain}`));
         }
     } catch (error) {
-        console.error(`[@cocreate/acme] Error in SNI callback for domain: ${domain}`, error);
+        console.error(`[@cocreate/certificates] Error in SNI callback for domain: ${domain}`, error);
         cb(error);
     }
 }
 
 /**
- * Requests certificate generation dynamically via ACME protocols.
+ * Requests certificate generation dynamically via Certificates protocols.
  */
 export async function request(host, hostPosition, hostObject, organization_id, wildcard = false) {
     try {
@@ -611,7 +611,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         const domainPrivateKeyPem = domainKeyPair.privateKey.export({ type: "pkcs8", format: "pem" });
 
         if (!client) {
-            throw new Error("NativeAcmeClient has not been initialized. Call init() first.");
+            throw new Error("NativeCertificatesClient has not been initialized. Call init() first.");
         }
 
         const order = await client.createOrder(domains);
@@ -633,12 +633,12 @@ export async function request(host, hostPosition, hostObject, organization_id, w
                     array: "files",
                     object: {
                         "content-type": "text/plain",
-                        directory: "acme-challenge",
+                        directory: "certificates-challenge",
                         host: [auth.identifier.value],
                         name: httpChallenge.token,
                         organization_id: organization_id,
-                        path: "/.well-known/acme-challenge/",
-                        pathname: `/.well-known/acme-challenge/${httpChallenge.token}`,
+                        path: "/.well-known/certificates-challenge/",
+                        pathname: `/.well-known/certificates-challenge/${httpChallenge.token}`,
                         public: "true",
                         src: keyAuthorization
                     },
@@ -650,10 +650,10 @@ export async function request(host, hostPosition, hostObject, organization_id, w
             }
 
             try {
-                // Request validation from ACME server
+                // Request validation from Certificates server
                 await client.verifyChallenge(httpChallenge.url);
 
-                // Wait for ACME server to perform HTTP fetch and mark authorization valid
+                // Wait for Certificates server to perform HTTP fetch and mark authorization valid
                 await client.pollAuthorization(auth.url);
             } finally {
                 // Cleanup challenge record ONLY after validation completes (or fails)
@@ -664,7 +664,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
                         array: "files",
                         object: { _id: challenge_id },
                         organization_id
-                    }).catch(err => console.error("[@cocreate/acme] Cleanup challenge file error:", err));
+                    }).catch(err => console.error("[@cocreate/certificates] Cleanup challenge file error:", err));
                 }
             }
         }
@@ -677,7 +677,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         const expires = readCertificateExpiry(cert);
 
         set(host, expires, organization_id, hostKeyPath, cert, domainPrivateKeyPem);
-        console.log(`[@cocreate/acme] Successfully issued SSL certificate for ${host} (Expires: ${expires})`);
+        console.log(`[@cocreate/certificates] Successfully issued SSL certificate for ${host} (Expires: ${expires})`);
 
         if (server && server.crud) {
             server.crud.send({
@@ -694,7 +694,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
 
         return true;
     } catch (error) {
-        console.error(`[@cocreate/acme] Certificate failed to create for ${host}!`, error);
+        console.error(`[@cocreate/certificates] Certificate failed to create for ${host}!`, error);
         delete hosts[host];
         return false;
     }
@@ -713,13 +713,13 @@ export async function get(host, organization_id) {
     try {
         organization = await server.crud.getOrganization({ host, organization_id });
     } catch (error) {
-        console.error(`[@cocreate/acme] Failed database lookup during organization query for ${host}:`, error.message);
+        console.error(`[@cocreate/certificates] Failed database lookup during organization query for ${host}:`, error.message);
         return false;
     }
 
     // Safety check: Prevent TypeErrors if the DB yields undefined or returns an explicit error
     if (!organization || organization.error) {
-        console.warn(`[@cocreate/acme] Organization query for host "${host}" returned empty or error state.`);
+        console.warn(`[@cocreate/certificates] Organization query for host "${host}" returned empty or error state.`);
         return false;
     }
 
@@ -740,7 +740,7 @@ export async function get(host, organization_id) {
                     
                     if (isValid(expires)) {
                         set(host, expires, organization_id, hostKeyPath, organization.host[i].cert, organization.host[i].key);
-                        console.log(`[@cocreate/acme] Successfully loaded certificate for ${host} from database.`);
+                        console.log(`[@cocreate/certificates] Successfully loaded certificate for ${host} from database.`);
                         return true;
                     }
                 }
@@ -751,8 +751,8 @@ export async function get(host, organization_id) {
     }
 
     // --- PRE-FLIGHT DNS CHECK ---
-    // Prevent contacting ACME if the domain's DNS is not yet pointing to this node
-    const dnsValid = await verifyDnsBeforeAcme(host);
+    // Prevent contacting Certificates if the domain's DNS is not yet pointing to this node
+    const dnsValid = await verifyDnsBeforeCertificates(host);
     if (!dnsValid) {
         return false;
     }
@@ -765,7 +765,7 @@ export async function get(host, organization_id) {
  */
 export async function check(host, organization_id, pathname = "") {
     let hostname = host.split(":")[0];
-    if (hostname === "localhost" || hostname === "127.0.0.1" || pathname.startsWith("/.well-known/acme-challenge/")) {
+    if (hostname === "localhost" || hostname === "127.0.0.1" || pathname.startsWith("/.well-known/certificates-challenge/")) {
         return true;
     }
     if (certificates[host]) return true;
@@ -777,7 +777,7 @@ export async function check(host, organization_id, pathname = "") {
         
         if (isValid(expires)) {
             set(host, expires, organization_id);
-            console.log(`[@cocreate/acme] Successfully verified local SSL certificate for ${host}.`);
+            console.log(`[@cocreate/certificates] Successfully verified local SSL certificate for ${host}.`);
             return true;
         }
     }
@@ -857,11 +857,11 @@ export default {
     check,
     isValid,
     set,
-    NativeAcmeClient,
-    Client: NativeAcmeClient,
+    NativeCertificatesClient,
+    Client: NativeCertificatesClient,
     createCSR,
     isCertificateValid,
     checkCertificate,
-    ACME_DIRECTORY,
-    directory: ACME_DIRECTORY
+    Certificates_DIRECTORY,
+    directory: Certificates_DIRECTORY
 };

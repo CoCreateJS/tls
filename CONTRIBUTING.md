@@ -1,19 +1,19 @@
-# Contributing to CoCreate-acme
+# Contributing to CoCreate-certificates
 
-This project is work of [many contributors](https://github.com/CoCreate-app/CoCreate-acme/graphs/contributors).
-You're encouraged to submit [pull requests](https://github.com/CoCreate-app/CoCreate-acme/pulls),
-[propose features and discuss issues](https://github.com/CoCreate-app/CoCreate-acme/issues).
+This project is work of [many contributors](https://github.com/CoCreate-app/CoCreate-certificates/graphs/contributors).
+You're encouraged to submit [pull requests](https://github.com/CoCreate-app/CoCreate-certificates/pulls),
+[propose features and discuss issues](https://github.com/CoCreate-app/CoCreate-certificates/issues).
 
 In the examples below, substitute your Github username for `contributor` in URLs.
 
 ## Fork the Project
 
-Fork the [project on Github](https://github.com/CoCreate-app/CoCreate-acme) and check out your copy.
+Fork the [project on Github](https://github.com/CoCreate-app/CoCreate-certificates) and check out your copy.
 
 ```
-git clone https://github.com/contributor/CoCreate-acme.git
-cd CoCreate-acme
-git remote add upstream https://github.com/CoCreate-app/CoCreate-acme.git
+git clone https://github.com/contributor/CoCreate-certificates.git
+cd CoCreate-certificates
+git remote add upstream https://github.com/CoCreate-app/CoCreate-certificates.git
 ```
 
 ## Create a Topic Branch
@@ -70,7 +70,7 @@ git push origin my-feature-branch
 
 ## Make a Pull Request
 
-Go to [https://github.com/CoCreate-app/CoCreate-acme](https://github.com/CoCreate-app/CoCreate-acme) and select your feature branch.
+Go to [https://github.com/CoCreate-app/CoCreate-certificates](https://github.com/CoCreate-app/CoCreate-certificates) and select your feature branch.
 Click the 'Pull Request' button and fill out the form. Pull requests are usually reviewed within a few days.
 
 ## Rebase

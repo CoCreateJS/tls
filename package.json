@@ -1,12 +1,12 @@
 {
-  "name": "@cocreate/acme",
+  "name": "@cocreate/certificates",
   "version": "1.8.0",
-  "description": "An automated multi-tenant ACME SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
+  "description": "An automated multi-tenant Certificates SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
   "keywords": [
     "cocreate",
     "cocreate-app",
-    "acme",
-    "acme-client",
+    "certificates",
+    "certificates-client",
     "ssl",
     "tls",
     "certificates",
@@ -29,14 +29,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CoCreate-app/CoCreate-acme.git"
+    "url": "git+https://github.com/CoCreate-app/CoCreate-certificates.git"
   },
   "author": "CoCreate LLC",
   "license": "AGPL-3.0",
   "bugs": {
-    "url": "https://github.com/CoCreate-app/CoCreate-acme/issues"
+    "url": "https://github.com/CoCreate-app/CoCreate-certificates/issues"
   },
-  "homepage": "https://cocreate.app/docs/acme",
+  "homepage": "https://cocreate.app/docs/certificates",
   "funding": {
     "type": "GitHub Sponsors ❤",
     "url": "https://github.com/sponsors/CoCreate-app"
