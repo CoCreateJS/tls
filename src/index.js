@@ -15,8 +15,8 @@ import dns from "node:dns/promises";
  * Standard Let's Encrypt Directory URLs
  */
 export const Certificates_DIRECTORY = {
-    LETSENCRYPT_PRODUCTION: "https://certificates-v02.api.letsencrypt.org/directory",
-    LETSENCRYPT_STAGING: "https://certificates-staging-v02.api.letsencrypt.org/directory"
+    LETSENCRYPT_PRODUCTION: "https://acme-v02.api.letsencrypt.org/directory",
+    LETSENCRYPT_STAGING: "https://acme-staging-v02.api.letsencrypt.org/directory"
 };
 
 export const directory = Certificates_DIRECTORY;
@@ -499,8 +499,6 @@ export async function init(parentServer, options = {}) {
 
         const directoryUrl = getDirectoryUrl(options);
         const modeName = directoryUrl === Certificates_DIRECTORY.LETSENCRYPT_PRODUCTION ? "PRODUCTION" : "STAGING";
-
-        console.log(`[@cocreate/certificates] Initializing Certificates authority client in ${modeName} mode (${directoryUrl})...`);
 
         // Native folder creation with secure, owner-only read/write/execute permissions
         if (!fs.existsSync(keyPath)) {
