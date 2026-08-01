@@ -4,12 +4,11 @@
  * Licensed under GNU AGPLv3.
  ********************************************************************************/
 
-import crypto from "node:crypto";
-import { Buffer } from "node:buffer";
 import fs from "node:fs";
 import tls from "node:tls";
 import path from "node:path";
 import dns from "node:dns/promises";
+import { security } from "@cocreate/utils";
 
 /**
  * Standard Let's Encrypt Directory URLs
@@ -43,139 +42,11 @@ export function getDirectoryUrl(options = {}) {
 }
 
 /**
- * Converts String or Buffer into a Base64URL string (RFC 7515)
- */
-function toBase64Url(input) {
-    const buf = Buffer.isBuffer(input)
-        ? input
-        : Buffer.from(input, typeof input === "string" ? "utf8" : undefined);
-    return buf.toString("base64url");
-}
-
-/**
- * Calculates RFC 7638 SHA-256 JWK Thumbprint
- */
-function getJwkThumbprint(jwk) {
-    const orderedJwk = jwk.kty === "RSA"
-        ? { e: jwk.e, kty: jwk.kty, n: jwk.n }
-        : { crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y };
-
-    const hash = crypto.createHash("sha256");
-    hash.update(JSON.stringify(orderedJwk));
-    return toBase64Url(hash.digest());
-}
-
-function derTag(tag, content) {
-    let lenBytes;
-    const len = content.length;
-
-    if (len < 128) {
-        lenBytes = Buffer.from([len]);
-    } else if (len < 256) {
-        lenBytes = Buffer.from([0x81, len]);
-    } else if (len < 65536) {
-        lenBytes = Buffer.from([0x82, (len >> 8) & 0xff, len & 0xff]);
-    } else {
-        lenBytes = Buffer.from([0x83, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff]);
-    }
-
-    return Buffer.concat([Buffer.from([tag]), lenBytes, content]);
-}
-
-function derSequence(items) {
-    return derTag(0x30, Buffer.concat(items));
-}
-
-function derSet(items) {
-    return derTag(0x31, Buffer.concat(items));
-}
-
-function derOID(oidString) {
-    const parts = oidString.split(".").map(Number);
-    const bytes = [parts[0] * 40 + parts[1]];
-
-    for (let i = 2; i < parts.length; i++) {
-        let val = parts[i];
-        const stack = [];
-        stack.push(val & 0x7f);
-        while ((val >>= 7) > 0) {
-            stack.push((val & 0x7f) | 0x80);
-        }
-        bytes.push(...stack.reverse());
-    }
-
-    return derTag(0x06, Buffer.from(bytes));
-}
-
-/**
  * Generates a DER-encoded PKCS#10 Certificate Signing Request (CSR)
- * supporting single and multi-domain (SAN) configurations.
+ * supporting single and multi-domain (SAN) configurations via security engine.
  */
 export function createCSR(privateKeyInput, domains) {
-    if (!domains || domains.length === 0) {
-        throw new Error("At least one domain is required to generate a CSR");
-    }
-
-    const privateKey = typeof privateKeyInput === "string"
-        ? crypto.createPrivateKey(privateKeyInput)
-        : privateKeyInput;
-
-    const primaryDomain = domains[0];
-    const pubKeyDetails = crypto.createPublicKey(privateKey);
-    const spkiDer = pubKeyDetails.export({ type: "spki", format: "der" });
-
-    // Subject Attribute: Common Name (CN = primaryDomain)
-    const subject = derSequence([
-        derSet([
-            derSequence([
-                derOID("2.5.4.3"), // CommonName OID
-                derTag(0x0c, Buffer.from(primaryDomain, "utf8")) // UTF8String
-            ])
-        ])
-    ]);
-
-    // Extension Request: Subject Alternative Names (SAN)
-    const sanEntries = domains.map(domain => derTag(0x82, Buffer.from(domain, "utf8"))); // Context primitive [2] dNSName
-    const sanExtension = derSequence([
-        derOID("2.5.29.17"), // subjectAltName OID
-        derTag(0x04, derSequence(sanEntries)) // OCTET STRING containing SAN Sequence
-    ]);
-
-    const extensionsSequence = derSequence([sanExtension]);
-    const attributeExtensionReq = derTag(0xa0, derSequence([
-        derOID("1.2.840.113549.1.9.14"), // extensionRequest OID
-        derSet([extensionsSequence])
-    ]));
-
-    // CertificationRequestInfo structure
-    const certReqInfo = derSequence([
-        derTag(0x02, Buffer.from([0x00])), // Version 0
-        subject,
-        spkiDer,
-        attributeExtensionReq
-    ]);
-
-    // Sign CertificationRequestInfo with Domain Private Key
-    const signer = crypto.createSign("SHA256");
-    signer.update(certReqInfo);
-    const signature = signer.sign(privateKey);
-
-    // Signature Algorithm OID (sha256WithRSAEncryption or ecdsa-with-SHA256)
-    const isEC = privateKey.asymmetricKeyType === "ec";
-    const sigAlgOid = isEC ? "1.2.840.10045.4.3.2" : "1.2.840.113549.1.1.11";
-    const sigAlgorithm = derSequence([
-        derOID(sigAlgOid),
-        isEC ? Buffer.alloc(0) : derTag(0x05, Buffer.alloc(0)) // NULL parameters for RSA
-    ]);
-
-    // PKCS#10 CertificationRequest Sequence
-    const csrDer = derSequence([
-        certReqInfo,
-        sigAlgorithm,
-        derTag(0x03, Buffer.concat([Buffer.from([0x00]), signature])) // BIT STRING
-    ]);
-
-    return toBase64Url(csrDer);
+    return security.createCSR(privateKeyInput, domains);
 }
 
 /**
@@ -187,9 +58,10 @@ export class NativeCertificatesClient {
         
         let accountKey = options.accountKey;
         if (typeof accountKey === "string") {
-            accountKey = crypto.createPrivateKey(accountKey);
+            accountKey = security.parsePrivateKey(accountKey);
         } else if (!accountKey) {
-            accountKey = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+            const keyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
+            accountKey = security.parsePrivateKey(keyPair.privateKey);
         }
 
         this.accountKey = accountKey;
@@ -197,9 +69,8 @@ export class NativeCertificatesClient {
         this.nonce = null;
         this.directory = null;
 
-        const pubKey = crypto.createPublicKey(this.accountKey);
-        this.jwk = pubKey.export({ format: "jwk" });
-        this.jwkThumbprint = getJwkThumbprint(this.jwk);
+        this.jwk = security.exportJwk(this.accountKey);
+        this.jwkThumbprint = security.getJwkThumbprint(this.jwk);
     }
 
     /**
@@ -231,34 +102,17 @@ export class NativeCertificatesClient {
         }
 
         // RFC 8555 Requirement: Post-account creation requests MUST use 'kid' (accountUrl) instead of 'jwk'.
-        // Automatically retrieve/verify account URL if calling any non-newAccount endpoint without accountUrl set.
         if (!this.accountUrl && this.directory && url !== this.directory.newAccount) {
             await this.createAccount({ termsOfServiceAgreed: true });
         }
 
-        const isEC = this.accountKey.asymmetricKeyType === "ec";
-        const alg = isEC ? "ES256" : "RS256";
-
         const header = {
-            alg,
             nonce: this.nonce,
             url,
             ...(this.accountUrl ? { kid: this.accountUrl } : { jwk: this.jwk })
         };
 
-        const protectedHeader = toBase64Url(JSON.stringify(header));
-        const payloadString = payload !== "" ? toBase64Url(typeof payload === "string" ? payload : JSON.stringify(payload)) : "";
-
-        const signInput = `${protectedHeader}.${payloadString}`;
-        const signer = crypto.createSign(isEC ? "sha256" : "SHA256");
-        signer.update(signInput);
-        const signature = toBase64Url(signer.sign(this.accountKey));
-
-        const body = JSON.stringify({
-            protected: protectedHeader,
-            payload: payloadString,
-            signature
-        });
+        const body = security.createJWS(header, payload, this.accountKey);
 
         const res = await fetch(url, {
             method: "POST",
@@ -273,7 +127,10 @@ export class NativeCertificatesClient {
 
         if (!res.ok) {
             const errorData = await res.clone().json().catch(() => ({}));
-            if (errorData.type === "urn:ietf:params:certificates:error:badNonce") {
+            if (
+                errorData.type === "urn:ietf:params:acme:error:badNonce" ||
+                errorData.type === "urn:ietf:params:certificates:error:badNonce"
+            ) {
                 await this.fetchNonce();
                 return this.postJws(url, payload);
             }
@@ -471,16 +328,10 @@ async function verifyDnsBeforeCertificates(domain) {
 }
 
 /**
- * Extracts expiration Date from a PEM Certificate using native Node crypto.X509Certificate
+ * Extracts expiration Date from a PEM Certificate using security utility.
  */
 function readCertificateExpiry(certPem) {
-    try {
-        const x509 = new crypto.X509Certificate(certPem);
-        return new Date(x509.validTo);
-    } catch (err) {
-        console.error("[@cocreate/certificates] Failed reading certificate expiry date:", err.message);
-        return null;
-    }
+    return security.readCertificateExpiry(certPem);
 }
 
 /**
@@ -509,8 +360,8 @@ export async function init(parentServer, options = {}) {
         let accountKey = "";
 
         if (!fs.existsSync(accountKeyPath)) {
-            const keyPair = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-            accountKey = keyPair.privateKey.export({ type: "pkcs8", format: "pem" });
+            const keyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
+            accountKey = keyPair.privateKey;
             fs.writeFileSync(accountKeyPath, accountKey, { mode: 0o600 });
         } else {
             accountKey = fs.readFileSync(accountKeyPath, "utf8");
@@ -605,8 +456,8 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         }
 
         const domains = wildcard ? [host, `*.${host}`] : [host];
-        const domainKeyPair = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-        const domainPrivateKeyPem = domainKeyPair.privateKey.export({ type: "pkcs8", format: "pem" });
+        const domainKeyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
+        const domainPrivateKeyPem = domainKeyPair.privateKey;
 
         if (!client) {
             throw new Error("NativeCertificatesClient has not been initialized. Call init() first.");
@@ -668,7 +519,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         }
 
         const readyOrder = await client.pollOrder(order.url, "ready");
-        await client.finalizeOrder(readyOrder, domainKeyPair.privateKey, domains);
+        await client.finalizeOrder(readyOrder, domainPrivateKeyPem, domains);
         const validOrder = await client.pollOrder(order.url, "valid");
 
         const cert = await client.downloadCertificate(validOrder.certificate);
@@ -822,8 +673,8 @@ export function set(host, expires, organization_id, hostKeyPath, cert, key) {
  */
 export function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
     try {
-        const x509 = new crypto.X509Certificate(certPem);
-        const expiryDate = new Date(x509.validTo);
+        const expiryDate = readCertificateExpiry(certPem);
+        if (!expiryDate) return false;
         const msPerDay = 1000 * 60 * 60 * 24;
         const daysRemaining = (expiryDate.getTime() - Date.now()) / msPerDay;
 
