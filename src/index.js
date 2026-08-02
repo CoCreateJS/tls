@@ -8,51 +8,99 @@ import fs from "node:fs";
 import tls from "node:tls";
 import path from "node:path";
 import dns from "node:dns/promises";
+import config from "@cocreate/config";
 import { security } from "@cocreate/utils";
 
-/**
- * Standard Let's Encrypt Directory URLs
- */
-export const Certificates_DIRECTORY = {
+const Certificates_DIRECTORY = {
     LETSENCRYPT_PRODUCTION: "https://acme-v02.api.letsencrypt.org/directory",
     LETSENCRYPT_STAGING: "https://acme-staging-v02.api.letsencrypt.org/directory"
 };
 
-export const directory = Certificates_DIRECTORY;
-
-/**
- * Global environment toggle configuration.
- * Can be changed at startup or dynamically via options or env vars.
- */
-export const config = {
-    // Default to production unless explicitly set to staging via env or options
-    isProduction: process.env.Certificates_ENV !== "staging" && process.env.Certificates_STAGING !== "true"
+const defaults = {
+    certificates: {
+        cache: false,
+        cacheTTL: 10 * 60 * 1000, // 10 minutes
+        environment: (
+            process.env.ENVIRONMENT || 
+            process.env.NODE_ENV || 
+            process.env.Certificates_ENV || 
+            "production"
+        ).toLowerCase()
+    }
 };
 
 /**
- * Resolves directory URL based on options, config, or env variables
- * @param {Object} [options] - Optional override parameters
- * @returns {string} Fully qualified Certificates directory URL
+ * Active live configuration state object.
+ * Accessible via server.certificates.config
  */
-export function getDirectoryUrl(options = {}) {
-    if (options.directoryUrl) return options.directoryUrl;
-    
-    const isProd = options.production ?? (options.staging !== undefined ? !options.staging : config.isProduction);
-    return isProd ? Certificates_DIRECTORY.LETSENCRYPT_PRODUCTION : Certificates_DIRECTORY.LETSENCRYPT_STAGING;
+export const certificatesConfig = { ...defaults.certificates };
+
+function mergeDeep(target, ...sources) {
+    if (!target || typeof target !== 'object') target = {};
+    for (const source of sources) {
+        if (!source || typeof source !== 'object') continue;
+        for (const key of Object.keys(source)) {
+            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                if (!target[key] || typeof target[key] !== 'object') {
+                    target[key] = {};
+                }
+                mergeDeep(target[key], source[key]);
+            } else if (source[key] !== undefined) {
+                target[key] = source[key];
+            }
+        }
+    }
+    return target;
 }
 
-/**
- * Generates a DER-encoded PKCS#10 Certificate Signing Request (CSR)
- * supporting single and multi-domain (SAN) configurations via security engine.
- */
-export function createCSR(privateKeyInput, domains) {
+async function loadCertificatesConfig() {
+    try {
+        const sysConfig = await config.get('certificates');
+
+        let dbConfig = null;
+        if (server) {
+            dbConfig = await config.query({
+                type: 'certificates',
+                organization_id: server.organization_id,
+                server: server.host,
+                cluster: server.cluster_id
+            });
+        }
+
+        const normalizedSys = sysConfig && sysConfig.certificates ? sysConfig : { certificates: sysConfig };
+        const normalizedDb = dbConfig && dbConfig.certificates ? dbConfig : { certificates: dbConfig };
+
+        const merged = mergeDeep({}, defaults, normalizedSys, normalizedDb);
+        const resolvedConfig = merged.certificates || merged;
+
+        Object.assign(certificatesConfig, resolvedConfig);
+    } catch (error) {
+        console.error("[@cocreate/certificates] Failed to load certificates configuration:", error.message);
+    }
+
+    return certificatesConfig;
+}
+
+function getDirectoryUrl(options = {}) {
+    if (options.directoryUrl) return options.directoryUrl;
+    
+    const env = (
+        options.environment || 
+        options.env || 
+        (options.production === true ? "production" : options.staging === true ? "staging" : certificatesConfig.environment)
+    ).toLowerCase();
+
+    const isProduction = env === "production" || env === "prod";
+    return isProduction 
+        ? Certificates_DIRECTORY.LETSENCRYPT_PRODUCTION 
+        : Certificates_DIRECTORY.LETSENCRYPT_STAGING;
+}
+
+function createCSR(privateKeyInput, domains) {
     return security.createCSR(privateKeyInput, domains);
 }
 
-/**
- * Zero-Dependency Direct Certificates Client (RFC 8555)
- */
-export class NativeCertificatesClient {
+class NativeCertificatesClient {
     constructor(options = {}) {
         this.directoryUrl = getDirectoryUrl(options);
         
@@ -73,9 +121,6 @@ export class NativeCertificatesClient {
         this.jwkThumbprint = security.getJwkThumbprint(this.jwk);
     }
 
-    /**
-     * Initializes directory endpoints and fetches an initial anti-replay nonce
-     */
     async init() {
         const res = await fetch(this.directoryUrl);
         if (!res.ok) {
@@ -85,23 +130,16 @@ export class NativeCertificatesClient {
         await this.fetchNonce();
     }
 
-    /**
-     * Retrieves a fresh Replay-Nonce header from the Certificates server
-     */
     async fetchNonce() {
         const res = await fetch(this.directory.newNonce, { method: "HEAD" });
         this.nonce = res.headers.get("replay-nonce");
     }
 
-    /**
-     * Sends an authenticated JWS payload to an Certificates endpoint
-     */
     async postJws(url, payload) {
         if (!this.nonce) {
             await this.fetchNonce();
         }
 
-        // RFC 8555 Requirement: Post-account creation requests MUST use 'kid' (accountUrl) instead of 'jwk'.
         if (!this.accountUrl && this.directory && url !== this.directory.newAccount) {
             await this.createAccount({ termsOfServiceAgreed: true });
         }
@@ -139,9 +177,6 @@ export class NativeCertificatesClient {
         return res;
     }
 
-    /**
-     * Registers or logs in an Certificates Account (newAccount)
-     */
     async createAccount(options = {}) {
         const payload = {
             termsOfServiceAgreed: options.termsOfServiceAgreed ?? true,
@@ -157,9 +192,6 @@ export class NativeCertificatesClient {
         return await res.json();
     }
 
-    /**
-     * Submits a new Certificate Order (newOrder)
-     */
     async createOrder(domains) {
         const identifiers = domains.map(domain => ({ type: "dns", value: domain }));
         const res = await this.postJws(this.directory.newOrder, { identifiers });
@@ -173,9 +205,6 @@ export class NativeCertificatesClient {
         return { ...orderData, url: orderLocation };
     }
 
-    /**
-     * Retrieves domain authorization details and challenge tokens
-     */
     async getAuthorizations(order) {
         const authorizations = [];
         for (const authUrl of order.authorizations) {
@@ -186,16 +215,10 @@ export class NativeCertificatesClient {
         return authorizations;
     }
 
-    /**
-     * Computes the HTTP-01 or DNS-01 key authorization token string
-     */
     getKeyAuthorization(token) {
         return `${token}.${this.jwkThumbprint}`;
     }
 
-    /**
-     * Triggers Certificates server to verify a challenge (e.g., HTTP-01 or DNS-01)
-     */
     async verifyChallenge(challengeUrl) {
         const res = await this.postJws(challengeUrl, {});
         if (!res.ok) {
@@ -204,9 +227,6 @@ export class NativeCertificatesClient {
         return await res.json();
     }
 
-    /**
-     * Polls an Certificates Authorization URL until status is 'valid' or 'invalid'
-     */
     async pollAuthorization(authUrl, maxAttempts = 15, delayMs = 2000) {
         for (let i = 0; i < maxAttempts; i++) {
             const res = await this.postJws(authUrl, "");
@@ -230,9 +250,6 @@ export class NativeCertificatesClient {
         throw new Error(`Timed out waiting for Certificates Authorization status to reach 'valid'`);
     }
 
-    /**
-     * Polls the Certificates Order URL until status becomes 'ready' or 'valid'
-     */
     async pollOrder(orderUrl, targetStatus = "ready", maxAttempts = 10, delayMs = 2000) {
         for (let i = 0; i < maxAttempts; i++) {
             const res = await this.postJws(orderUrl, "");
@@ -252,9 +269,6 @@ export class NativeCertificatesClient {
         throw new Error(`Timed out waiting for Certificates Order status to reach '${targetStatus}'`);
     }
 
-    /**
-     * Finalizes the order by sending the generated Certificate Signing Request (CSR)
-     */
     async finalizeOrder(order, domainPrivateKey, domains) {
         const csrBase64Url = createCSR(domainPrivateKey, domains);
         const res = await this.postJws(order.finalize, { csr: csrBase64Url });
@@ -266,9 +280,6 @@ export class NativeCertificatesClient {
         return await res.json();
     }
 
-    /**
-     * Downloads the final issued SSL/TLS PEM Certificate chain
-     */
     async downloadCertificate(certificateUrl) {
         const res = await this.postJws(certificateUrl, "");
         if (!res.ok) {
@@ -278,184 +289,121 @@ export class NativeCertificatesClient {
     }
 }
 
-// Backward-compatible alias for third-party libraries expecting `Client`
-export const Client = NativeCertificatesClient;
-
-let server = null; // Direct reference used across all module functions
-const email = "ssl@cocreatejs.com";
+let server = null;
 const keyPath = path.join(process.cwd(), ".certificates") + path.sep;
 
 let client = null;
 const hosts = {};
 const certificates = {};
 
-// ==========================================
-// SNI Memory Management
-// ==========================================
-const secureContextCache = new Map();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const failedHosts = new Map();
+const FAILED_COOLDOWN_MS = 5 * 60 * 1000;
 
-// Background Garbage Collection for inactive contexts
+const secureContextCache = new Map();
+
 setInterval(() => {
+    if (!certificatesConfig.cache) {
+        if (secureContextCache.size > 0) {
+            secureContextCache.clear();
+        }
+        return;
+    }
     const now = Date.now();
+    const ttl = certificatesConfig.cacheTTL || (10 * 60 * 1000);
     for (const [domain, data] of secureContextCache.entries()) {
-        if (now - data.timestamp > CACHE_TTL) {
+        if (now - data.timestamp > ttl) {
             secureContextCache.delete(domain);
         }
     }
-}, 60 * 1000).unref(); // Unref prevents this timer from blocking a clean process exit
+}, 60 * 1000).unref();
 
 const DAYS = Math.floor(Math.random() * 7);
-const HOURS = Math.floor(Math.random() * 24);
-const MINUTES = Math.floor(Math.random() * 60);
 
-/**
- * Executes a DNS lookup to ensure the domain actually points to this infrastructure
- * before requesting a certificate, preventing Certificates rate limit bans.
- */
 async function verifyDnsBeforeCertificates(domain) {
     try {
         const addresses = await dns.resolve4(domain);
-        // If the server knows its own IP, strictly match it. Otherwise, ensure it resolves to *something*.
         if (server && server.ip && addresses.length > 0) {
             return addresses.includes(server.ip);
         }
         return addresses.length > 0;
-    } catch (err) {
-        console.warn(`[@cocreate/certificates] DNS pre-flight failed for ${domain}. Skipping Let's Encrypt request.`);
-        return false;
+    } catch {
+        return certificatesConfig.environment !== "production";
     }
 }
 
-/**
- * Extracts expiration Date from a PEM Certificate using security utility.
- */
 function readCertificateExpiry(certPem) {
-    return security.readCertificateExpiry(certPem);
-}
-
-/**
- * Bootstraps the Certificates account keys, directories, and instantiates the
- * secure HTTPS server context, attaching it back to the parent server reference.
- * @param {Object} parentServer - Parent CoCreateServer singleton instance
- * @param {Object} [options] - Optional options ({ production: boolean, staging: boolean, directoryUrl: string })
- */
-export async function init(parentServer, options = {}) {
     try {
-        server = parentServer;
-
-        // Apply top-level options if provided
-        if (options.production !== undefined) config.isProduction = Boolean(options.production);
-        if (options.staging !== undefined) config.isProduction = !options.staging;
-
-        const directoryUrl = getDirectoryUrl(options);
-        const modeName = directoryUrl === Certificates_DIRECTORY.LETSENCRYPT_PRODUCTION ? "PRODUCTION" : "STAGING";
-
-        // Native folder creation with secure, owner-only read/write/execute permissions
-        if (!fs.existsSync(keyPath)) {
-            fs.mkdirSync(keyPath, { recursive: true, mode: 0o700 });
+        if (!certPem) return null;
+        const pemString = typeof certPem !== "string" ? certPem.toString() : certPem;
+        const expiry = security.readCertificateExpiry(pemString);
+        if (expiry) {
+            const date = new Date(expiry);
+            if (!isNaN(date.getTime())) return date;
         }
-
-        const accountKeyPath = `${keyPath}account.pem`;
-        let accountKey = "";
-
-        if (!fs.existsSync(accountKeyPath)) {
-            const keyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
-            accountKey = keyPair.privateKey;
-            fs.writeFileSync(accountKeyPath, accountKey, { mode: 0o600 });
-        } else {
-            accountKey = fs.readFileSync(accountKeyPath, "utf8");
-        }
-
-        client = new NativeCertificatesClient({
-            directoryUrl,
-            accountKey
-        });
-
-        await client.init();
-
-        try {
-            await client.createAccount({
-                termsOfServiceAgreed: true,
-                email
-            });
-            console.log(`[@cocreate/certificates] Certificates authority account initialized successfully (${modeName})!`);
-        } catch (error) {
-            console.error("[@cocreate/certificates] Error initializing account credentials:", error.message);
-        }
-    } catch (err) {
-        console.error("[@cocreate/certificates] Error initializing certificate client:", err);
-        throw err;
+        return null;
+    } catch {
+        return null;
     }
 }
 
-/**
- * Interface Contract:
- * Reads SSL credentials dynamically from the secure file system.
- * @param {string} domain - Target host address
- * @returns {{key: Buffer, cert: Buffer}} Native Node TLS credential buffer
- */
-export function load(domain) {
+function load(domain) {
     try {
+        const cleanDomain = domain.split(":")[0].toLowerCase();
         return {
-            key: fs.readFileSync(`${keyPath}${domain}/private-key.pem`),
-            cert: fs.readFileSync(`${keyPath}${domain}/fullchain.pem`),
+            key: fs.readFileSync(`${keyPath}${cleanDomain}/private-key.pem`),
+            cert: fs.readFileSync(`${keyPath}${cleanDomain}/fullchain.pem`),
         };
     } catch (error) {
-        console.error(`[@cocreate/certificates] Error loading SSL certificates for domain: ${domain}`, error);
+        console.error(`[@cocreate/certificates] Error loading SSL certificates for domain "${domain}":`, error);
         throw error;
     }
 }
 
-/**
- * Core SNI Handshake implementation. Resolves domains dynamically and caches TLS Contexts in RAM.
- * @param {string} domain - Incoming target SNI hostname
- * @param {Function} cb - Resolution completion callback
- */
-export async function sniCallback(domain, cb) {
+async function sniCallback(domain, cb) {
     try {
-        // 1. Check RAM Cache First (Sub-millisecond response)
-        if (secureContextCache.has(domain)) {
-            const cacheEntry = secureContextCache.get(domain);
-            cacheEntry.timestamp = Date.now(); // Renew TTL
+        const cleanDomain = domain.split(":")[0].toLowerCase();
+
+        if (certificatesConfig.cache && secureContextCache.has(cleanDomain)) {
+            const cacheEntry = secureContextCache.get(cleanDomain);
+            cacheEntry.timestamp = Date.now();
             return cb(null, cacheEntry.context);
         }
 
-        // 2. Fallback to Disk / Database / Certificates creation
-        const isValidDomain = await check(domain);
+        const isValidDomain = await check(cleanDomain);
         
         if (isValidDomain) {
-            const credentials = load(domain);
+            const credentials = load(cleanDomain);
             const sslContext = tls.createSecureContext(credentials);
             
-            // 3. Store Compiled C++ Context in RAM
-            secureContextCache.set(domain, {
-                context: sslContext,
-                timestamp: Date.now()
-            });
+            if (certificatesConfig.cache) {
+                secureContextCache.set(cleanDomain, {
+                    context: sslContext,
+                    timestamp: Date.now()
+                });
+            }
             
             cb(null, sslContext);
         } else {
-            cb(new Error(`[@cocreate/certificates] Unauthorized secure request for domain: ${domain}`));
+            cb(new Error(`[@cocreate/certificates] Unauthorized secure request for domain: ${cleanDomain}`));
         }
     } catch (error) {
-        console.error(`[@cocreate/certificates] Error in SNI callback for domain: ${domain}`, error);
+        console.error(`[@cocreate/certificates] Error in SNI callback for domain "${domain}":`, error);
         cb(error);
     }
 }
 
-/**
- * Requests certificate generation dynamically via Certificates protocols.
- */
-export async function request(host, hostPosition, hostObject, organization_id, wildcard = false) {
+const SNICallback = sniCallback;
+
+async function request(host, hostPosition, hostObject, organization_id, wildcard = false) {
     try {
-        const hostKeyPath = `${keyPath}${host}/`;
+        const domain = host.split(":")[0].toLowerCase();
+        const hostKeyPath = `${keyPath}${domain}/`;
         
         if (!fs.existsSync(hostKeyPath)) {
             fs.mkdirSync(hostKeyPath, { recursive: true, mode: 0o700 });
         }
 
-        const domains = wildcard ? [host, `*.${host}`] : [host];
+        const domains = wildcard ? [domain, `*.${domain}`] : [domain];
         const domainKeyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
         const domainPrivateKeyPem = domainKeyPair.privateKey;
 
@@ -467,9 +415,7 @@ export async function request(host, hostPosition, hostObject, organization_id, w
         const authorizations = await client.getAuthorizations(order);
 
         for (const auth of authorizations) {
-            if (auth.status === "valid") {
-                continue;
-            }
+            if (auth.status === "valid") continue;
 
             const httpChallenge = auth.challenges.find(c => c.type === "http-01") || auth.challenges[0];
             const keyAuthorization = client.getKeyAuthorization(httpChallenge.token);
@@ -478,17 +424,18 @@ export async function request(host, hostPosition, hostObject, organization_id, w
             if (httpChallenge.type === "http-01" && server && server.crud) {
                 const httpChallengeRes = await server.crud.send({
                     method: "object.create",
-                    host,
+                    host: domain,
                     array: "files",
                     object: {
                         "content-type": "text/plain",
-                        directory: "certificates-challenge",
+                        directory: "acme-challenge",
                         host: [auth.identifier.value],
                         name: httpChallenge.token,
                         organization_id: organization_id,
-                        path: "/.well-known/certificates-challenge/",
-                        pathname: `/.well-known/certificates-challenge/${httpChallenge.token}`,
-                        public: "true",
+                        path: "/.well-known/acme-challenge/",
+                        pathname: `/.well-known/acme-challenge/${httpChallenge.token}`,
+                        public: true,
+                        isPublic: true,
                         src: keyAuthorization
                     },
                     organization_id
@@ -499,17 +446,13 @@ export async function request(host, hostPosition, hostObject, organization_id, w
             }
 
             try {
-                // Request validation from Certificates server
                 await client.verifyChallenge(httpChallenge.url);
-
-                // Wait for Certificates server to perform HTTP fetch and mark authorization valid
                 await client.pollAuthorization(auth.url);
             } finally {
-                // Cleanup challenge record ONLY after validation completes (or fails)
                 if (httpChallenge.type === "http-01" && server && server.crud && challenge_id) {
                     await server.crud.send({
                         method: "object.delete",
-                        host,
+                        host: domain,
                         array: "files",
                         object: { _id: challenge_id },
                         organization_id
@@ -520,22 +463,21 @@ export async function request(host, hostPosition, hostObject, organization_id, w
 
         const readyOrder = await client.pollOrder(order.url, "ready");
         await client.finalizeOrder(readyOrder, domainPrivateKeyPem, domains);
+        
         const validOrder = await client.pollOrder(order.url, "valid");
-
         const cert = await client.downloadCertificate(validOrder.certificate);
         const expires = readCertificateExpiry(cert);
 
-        set(host, expires, organization_id, hostKeyPath, cert, domainPrivateKeyPem);
-        console.log(`[@cocreate/certificates] Successfully issued SSL certificate for ${host} (Expires: ${expires})`);
+        set(domain, expires, organization_id, hostKeyPath, cert, domainPrivateKeyPem);
 
-        if (server && server.crud) {
+        if (server && server.crud && organization_id && hostPosition !== undefined) {
             server.crud.send({
                 method: "object.update",
-                host,
+                host: domain,
                 array: "organizations",
                 object: {
                     _id: organization_id,
-                    [`host[${hostPosition}]`]: { ...hostObject, name: host, cert, key: domainPrivateKeyPem, expires }
+                    [`host[${hostPosition}]`]: { ...hostObject, name: domain, cert, key: domainPrivateKeyPem, expires }
                 },
                 organization_id
             });
@@ -543,135 +485,182 @@ export async function request(host, hostPosition, hostObject, organization_id, w
 
         return true;
     } catch (error) {
-        console.error(`[@cocreate/certificates] Certificate failed to create for ${host}!`, error);
-        delete hosts[host];
+        const domain = host.split(":")[0].toLowerCase();
+        console.error(`[@cocreate/certificates] Certificate creation failed for host "${domain}": ${error.message}`, error);
+        delete hosts[domain];
         return false;
     }
 }
 
-/**
- * Resolves organization records and matches valid certificate credentials.
- */
-export async function get(host, organization_id) {
-    const hostKeyPath = `${keyPath}${host}/`;
+async function get(host, organization_id) {
+    const domain = host.split(":")[0].toLowerCase();
+    const hostKeyPath = `${keyPath}${domain}/`;
     let hostPosition, hostObject;
 
-    if (!server || !server.crud) return false;
+    if (!server || !server.crud) {
+        console.error(`[@cocreate/certificates] Aborting certificate lookup for host "${domain}": Server CRUD interface unavailable.`);
+        return false;
+    }
 
     let organization;
     try {
-        organization = await server.crud.getOrganization({ host, organization_id });
+        organization = await server.crud.getOrganization({ host: domain, organization_id });
     } catch (error) {
-        console.error(`[@cocreate/certificates] Failed database lookup during organization query for ${host}:`, error.message);
+        console.error(`[@cocreate/certificates] CRUD error fetching organization for host "${domain}":`, error);
         return false;
     }
 
-    // Safety check: Prevent TypeErrors if the DB yields undefined or returns an explicit error
+    if (organization?.object) {
+        organization = Array.isArray(organization.object) ? organization.object[0] : organization.object;
+    } else if (Array.isArray(organization)) {
+        organization = organization[0];
+    }
+
     if (!organization || organization.error) {
-        console.warn(`[@cocreate/certificates] Organization query for host "${host}" returned empty or error state.`);
+        if (organization?.error) {
+            console.error(`[@cocreate/certificates] Organization query error for host "${domain}":`, organization.error);
+        }
         return false;
     }
 
-    // Dynamic Resolution: If organization_id is not passed (e.g., during a blind SNI callback),
-    // extract it directly from the resolved organization record to enforce correct database routing.
     if (!organization_id && organization._id) {
         organization_id = organization._id;
     }
 
-    if (organization.host) {
+    let domainMatched = false;
+    if (Array.isArray(organization.host)) {
         for (let i = 0; i < organization.host.length; i++) {
-            if (organization.host[i].name === host) {
+            const hostItem = organization.host[i];
+            const hostName = typeof hostItem === "string" ? hostItem : hostItem?.name;
+
+            if (hostName && hostName.toLowerCase() === domain) {
+                domainMatched = true;
                 hostPosition = i;
-                hostObject = organization.host[i];
+                hostObject = typeof hostItem === "object" ? hostItem : { name: hostItem };
                 
-                if (organization.host[i].cert && organization.host[i].key) {
-                    const expires = readCertificateExpiry(organization.host[i].cert);
+                const certPem = hostObject.cert;
+                const keyPem = hostObject.key;
+
+                if (certPem && keyPem) {
+                    const expires = hostObject.expires || readCertificateExpiry(certPem);
                     
                     if (isValid(expires)) {
-                        set(host, expires, organization_id, hostKeyPath, organization.host[i].cert, organization.host[i].key);
-                        console.log(`[@cocreate/certificates] Successfully loaded certificate for ${host} from database.`);
+                        set(domain, expires, organization_id, hostKeyPath, certPem, keyPem);
+                        
+                        if (shouldRenew(expires)) {
+                            request(domain, hostPosition, hostObject, organization_id, false).catch(err => {
+                                console.error(`[@cocreate/certificates] Background renewal failed for "${domain}":`, err.message);
+                            });
+                        }
                         return true;
                     }
                 }
                 break;
             }
         }
-        if (!hostPosition && hostPosition !== 0) return false;
     }
 
-    // --- PRE-FLIGHT DNS CHECK ---
-    // Prevent contacting Certificates if the domain's DNS is not yet pointing to this node
-    const dnsValid = await verifyDnsBeforeCertificates(host);
+    if (!domainMatched) {
+        return false;
+    }
+
+    const dnsValid = await verifyDnsBeforeCertificates(domain);
     if (!dnsValid) {
         return false;
     }
 
-    return await request(host, hostPosition, hostObject, organization_id, false);
+    return await request(domain, hostPosition, hostObject, organization_id, false);
 }
 
-/**
- * Checks database registries or local systems to verify if a valid cert exists.
- */
-export async function check(host, organization_id, pathname = "") {
-    let hostname = host.split(":")[0];
-    if (hostname === "localhost" || hostname === "127.0.0.1" || pathname.startsWith("/.well-known/certificates-challenge/")) {
+async function check(host, organization_id, pathname = "") {
+    if (!host) return false;
+    const domain = host.split(":")[0].toLowerCase();
+
+    if (domain === "localhost" || domain === "127.0.0.1" || pathname.startsWith("/.well-known/acme-challenge/")) {
         return true;
     }
-    if (certificates[host]) return true;
 
-    const hostKeyPath = `${keyPath}${host}/`;
-    if (fs.existsSync(`${hostKeyPath}fullchain.pem`)) {
-        let cert = fs.readFileSync(`${hostKeyPath}fullchain.pem`, "utf8");
-        let expires = readCertificateExpiry(cert);
-        
-        if (isValid(expires)) {
-            set(host, expires, organization_id);
-            console.log(`[@cocreate/certificates] Successfully verified local SSL certificate for ${host}.`);
+    if (certificates[domain]) {
+        if (isValid(certificates[domain].expires)) {
             return true;
+        }
+        delete certificates[domain];
+    }
+
+    if (failedHosts.has(domain)) {
+        const lastAttempt = failedHosts.get(domain);
+        if (Date.now() - lastAttempt < FAILED_COOLDOWN_MS) {
+            return false;
+        }
+        failedHosts.delete(domain);
+    }
+
+    const hostKeyPath = `${keyPath}${domain}/`;
+    const fullchainPath = `${hostKeyPath}fullchain.pem`;
+    const privateKeyPath = `${hostKeyPath}private-key.pem`;
+
+    if (fs.existsSync(fullchainPath) && fs.existsSync(privateKeyPath)) {
+        try {
+            let cert = fs.readFileSync(fullchainPath, "utf8");
+            let key = fs.readFileSync(privateKeyPath, "utf8");
+            let expires = readCertificateExpiry(cert);
+            
+            if (isValid(expires)) {
+                set(domain, expires, organization_id, hostKeyPath, cert, key);
+                
+                if (shouldRenew(expires)) {
+                    get(domain, organization_id).catch(err => {
+                        console.error(`[@cocreate/certificates] Background renewal check failed for "${domain}":`, err.message);
+                    });
+                }
+                return true;
+            }
+        } catch (e) {
+            console.error(`[@cocreate/certificates] Error reading local certificate for ${domain}:`, e.message);
         }
     }
 
-    if (!hosts[host]) hosts[host] = await get(host, organization_id);
-    return hosts[host];
+    if (!hosts[domain]) {
+        hosts[domain] = (async () => {
+            try {
+                const result = await get(domain, organization_id);
+                if (result) {
+                    failedHosts.delete(domain);
+                } else {
+                    failedHosts.set(domain, Date.now());
+                }
+                return result;
+            } catch (err) {
+                console.error(`[@cocreate/certificates] Exception during certificate resolution for "${domain}":`, err.message);
+                failedHosts.set(domain, Date.now());
+                throw err;
+            } finally {
+                delete hosts[domain];
+            }
+        })();
+    }
+
+    return await hosts[domain];
 }
 
-/**
- * Validates if a certificate has expired based on standard and randomized drift margins.
- */
-export function isValid(expires) {
+function isValid(expires) {
     if (!expires) return false;
     const expiryDate = typeof expires === "string" || typeof expires === "number" ? new Date(expires) : expires;
-
-    let currentDate = new Date();
-    currentDate.setDate(currentDate.getDate() + DAYS);
-    currentDate.setHours(currentDate.getHours() + HOURS);
-    currentDate.setMinutes(currentDate.getMinutes() + MINUTES);
-
-    return (expiryDate && currentDate < expiryDate);
+    if (!expiryDate || isNaN(new Date(expiryDate).getTime())) return false;
+    return new Date() < new Date(expiryDate);
 }
 
-/**
- * Writes dynamic credentials to disk securely and updates local tracking state.
- */
-export function set(host, expires, organization_id, hostKeyPath, cert, key) {
-    if (hostKeyPath) {
-        if (!fs.existsSync(hostKeyPath)) fs.mkdirSync(hostKeyPath, { recursive: true, mode: 0o700 });
-        // Enforce owner-only read/write permissions for sensitive key data
-        fs.writeFileSync(`${hostKeyPath}fullchain.pem`, cert, { mode: 0o600 });
-        fs.writeFileSync(`${hostKeyPath}private-key.pem`, key, { mode: 0o600 });
-    }
+function shouldRenew(expires) {
+    if (!expires) return true;
+    const expiryDate = typeof expires === "string" || typeof expires === "number" ? new Date(expires) : expires;
+    if (!expiryDate || isNaN(new Date(expiryDate).getTime())) return true;
 
-    // Safely bypassed if Nginx is entirely removed/omitted from this deployment
-    if (server && server.ingress && typeof server.ingress.createServer === "function") {
-        server.ingress.createServer(host);
-    }
-    certificates[host] = { expires, organization_id };
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() + 30 - DAYS);
+    return thresholdDate >= new Date(expiryDate);
 }
 
-/**
- * Checks if a PEM certificate string is valid and not expiring within renewDays threshold
- */
-export function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
+function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
     try {
         const expiryDate = readCertificateExpiry(certPem);
         if (!expiryDate) return false;
@@ -684,33 +673,88 @@ export function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
     }
 }
 
-/**
- * Flexible check function supporting both PEM string checks and options object checks
- */
-export async function checkCertificate(input, renewDaysBeforeExpiry = 30) {
-    if (typeof input === "string") {
-        return isCertificateValid(input, renewDaysBeforeExpiry);
+function set(host, expires, organization_id, hostKeyPath, cert, key) {
+    const domain = host.split(":")[0].toLowerCase();
+    const targetPath = hostKeyPath || `${keyPath}${domain}/`;
+    if (cert && key) {
+        if (!fs.existsSync(targetPath)) {
+            fs.mkdirSync(targetPath, { recursive: true, mode: 0o700 });
+        }
+        fs.writeFileSync(`${targetPath}fullchain.pem`, cert, { mode: 0o600 });
+        fs.writeFileSync(`${targetPath}private-key.pem`, key, { mode: 0o600 });
     }
-    return false;
+
+    if (server && server.ingress && typeof server.ingress.createServer === "function") {
+        server.ingress.createServer(domain);
+    }
+    certificates[domain] = { expires, organization_id };
+    failedHosts.delete(domain);
 }
 
-// Default export mimics the functional API entry point
-export default {
-    config,
-    getDirectoryUrl,
-    init,
-    load,
-    sniCallback,
-    request,
-    get,
-    check,
-    isValid,
-    set,
-    NativeCertificatesClient,
-    Client: NativeCertificatesClient,
-    createCSR,
-    isCertificateValid,
-    checkCertificate,
-    Certificates_DIRECTORY,
-    directory: Certificates_DIRECTORY
-};
+export async function checkCertificate(input, organization_id = null, renewDaysBeforeExpiry = 30) {
+    if (!input || typeof input !== "string") {
+        return { valid: false, domain: null, cert: null, key: null, expires: null };
+    }
+
+    if (input.includes("-----BEGIN CERTIFICATE-----")) {
+        const expires = readCertificateExpiry(input);
+        const valid = isCertificateValid(input, renewDaysBeforeExpiry);
+        return { valid, domain: null, cert: input, key: null, expires };
+    }
+
+    const domain = input.split(":")[0].toLowerCase();
+    const hostKeyPath = `${keyPath}${domain}/`;
+    const fullchainPath = `${hostKeyPath}fullchain.pem`;
+    const privateKeyPath = `${hostKeyPath}private-key.pem`;
+
+    if (fs.existsSync(fullchainPath) && fs.existsSync(privateKeyPath)) {
+        try {
+            const cert = fs.readFileSync(fullchainPath, "utf8");
+            const key = fs.readFileSync(privateKeyPath, "utf8");
+            const expires = readCertificateExpiry(cert);
+            const valid = isCertificateValid(cert, renewDaysBeforeExpiry);
+
+            if (valid) {
+                return { valid: true, domain, cert, key, expires };
+            }
+        } catch (e) {
+            console.error(`[@cocreate/certificates] Error reading certificate for ${domain}:`, e.message);
+        }
+    }
+
+    const hasValidCert = await check(domain, organization_id);
+    if (hasValidCert && fs.existsSync(fullchainPath) && fs.existsSync(privateKeyPath)) {
+        try {
+            const cert = fs.readFileSync(fullchainPath, "utf8");
+            const key = fs.readFileSync(privateKeyPath, "utf8");
+            const expires = readCertificateExpiry(cert);
+            const valid = isCertificateValid(cert, renewDaysBeforeExpiry);
+
+            return { valid, domain, cert, key, expires };
+        } catch (e) {
+            console.error(`[@cocreate/certificates] Error reading certificate for ${domain}:`, e.message);
+        }
+    }
+
+    return { valid: false, domain, cert: null, key: null, expires: null };
+}
+
+export async function init(serverInstance = null, options = {}) {
+    if (serverInstance) server = serverInstance;
+
+    await loadCertificatesConfig();
+
+    if (!client || options.accountKey || options.directoryUrl || options.environment) {
+        client = new NativeCertificatesClient(options);
+        await client.init();
+    }
+
+    return {
+        config: certificatesConfig,
+        checkCertificate,
+        SNICallback: sniCallback,
+        sniCallback
+    };
+}
+
+export default { init };
