@@ -1,8 +1,8 @@
-Here is the accurately updated, tailored README for `@cocreate/certificates` based directly on your provided source code implementation. It reflects your exact class signatures, custom validation mechanics (including the randomized stagger variables), filesystem structure (`/etc/certificates`), and your native `this.crud` database/file injection flows.
+Here is the accurately updated, tailored README for `@cocreate/server-tls` based directly on your provided source code implementation. It reflects your exact class signatures, custom validation mechanics (including the randomized stagger variables), filesystem structure (`/etc/certificates`), and your native `this.crud` database/file injection flows.
 
-# @cocreate/certificates
+# @cocreate/server-tls
 
-An automated, multi-tenant Certificates (Automated Certificate Management Environment) client and automated SSL/TLS provisioning wrapper built on top of `certificates-client`. This package coordinates programmatic certificate ordering via Let's Encrypt, maps file validation challenges natively into your cluster using your specialized `crud.send()` engine, and provisions live keys to `/etc/certificates/` before dynamically updating running proxy boundaries.
+An automated, multi-tenant TLS (Automated Certificate Management Environment) client and automated SSL/TLS provisioning wrapper built on top of `certificates-client`. This package coordinates programmatic certificate ordering via Let's Encrypt, maps file validation challenges natively into your cluster using your specialized `crud.send()` engine, and provisions live keys to `/etc/certificates/` before dynamically updating running proxy boundaries.
 
 ---
 
@@ -20,7 +20,7 @@ An automated, multi-tenant Certificates (Automated Certificate Management Enviro
 
 ## Features
 
-* **Automated Account & Key Creation:** Gracefully initializes `/etc/certificates`, provisions or loads an asymmetric `account.pem` key profile, and dynamically registers newly generated account contexts with the Certificates Directory.
+* **Automated Account & Key Creation:** Gracefully initializes `/etc/certificates`, provisions or loads an asymmetric `account.pem` key profile, and dynamically registers newly generated account contexts with the TLS Directory.
 * **Reactive Multi-Node Challenge Handling:** Writes `http-01` challenge validation payloads natively directly into persistent network collection tracks (`array: "files"`), enabling external verification processes to easily query and clear challenges on any active cluster node.
 * **Staggered Expiration Guards:** Leverages unique math-random constants (`DAYS`, `HOURS`, `MINUTES`) across server instances to prevent simultaneous, blocking stampedes when scanning and renewing multi-tenant custom domains.
 * **Inline Local Filesystem Provisioning:** Auto-writes validated credentials (`fullchain.pem` and `private-key.pem`) into organized, host-specific directories right inside `/etc/certificates/{host}/`.
@@ -31,7 +31,7 @@ An automated, multi-tenant Certificates (Automated Certificate Management Enviro
 ## Installation
 
 ```bash
-npm install @cocreate/certificates
+npm install @cocreate/server-tls
 
 ```
 
@@ -44,7 +44,7 @@ npm install @cocreate/certificates
 Inject your cluster's routing `proxy` interface and core database `crud` middleware service layer right into the instance constructor context:
 
 ```javascript
-const CoCreateCertificates = require('@cocreate/certificates');
+const CoCreateCertificates = require('@cocreate/server-tls');
 
 const proxyInstance = {
   createServer: (host) => console.log(`Hot-reloaded server certificates for: ${host}`)
@@ -60,7 +60,7 @@ const CertificatesManager = new CoCreateCertificates(proxyInstance, crudInstance
 
 ```
 
-### Checking and Provisioning Certificates Dynamically
+### Checking and Provisioning TLS Dynamically
 
 Intercept traffic requests or cron loops natively, evaluating if a domain possesses valid, active SSL coverage or requires a zero-friction automated provisioning lifecycle:
 
@@ -97,7 +97,7 @@ if (operational) {
 
 | Method | Arguments | Returns | Description |
 | --- | --- | --- | --- |
-| **`init()`** | *None* | `Promise<void>` | **Internal.** Sets up local directory layout, loads/stores account keys, and boots the Certificates interface. |
+| **`init()`** | *None* | `Promise<void>` | **Internal.** Sets up local directory layout, loads/stores account keys, and boots the TLS interface. |
 | **`checkCertificate(host, orgId, pathname)`** | `host: String`, `orgId: String`, `pathname: String` | `Promise<Boolean>` | High-level execution entry point. Bypasses dev routes, checks caches/disks, and manages provisioning rollouts. |
 | **`getCertificate(host, orgId)`** | `host: String`, `orgId: String` | `Promise<Boolean>` | Loads tenant details via `this.crud.getOrganization()`. Reuses valid db keys or invokes a new order lifecycle. |
 | **`requestCertificate(host, pos, hostObj, orgId, wildcard)`** | `String, Number, Object, String, Boolean` | `Promise<Boolean>` | Prepares CSR blocks, handles challenge loops, syncs structures with the database, and saves file buffers. |
@@ -108,9 +108,9 @@ if (operational) {
 
 ## How to Contribute
 
-We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreate-app/CoCreate-certificates/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreate-app/CoCreate-certificates/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
+We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreate-app/CoCreate-server-tls/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreate-app/CoCreate-server-tls/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
 
-For broader system configurations and API guides, please visit our [CoCreate Certificates Documentation](https://cocreatejs.com/docs/certificates).
+For broader system configurations and API guides, please visit our [CoCreate TLS Documentation](https://cocreatejs.com/docs/server-tls).
 
 ---
 

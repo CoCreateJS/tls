@@ -12,7 +12,7 @@ module.exports = {
                 "host": [
                     "*"
                 ],
-                "directory": "/demo/certificates/{{directory}}",
+                "directory": "/demo/server-tls/{{directory}}",
                 "path": "{{path}}",
                 "pathname": "{{pathname}}",
                 "content-type": "{{content-type}}",
@@ -26,13 +26,13 @@ module.exports = {
             "object": {
                 "_id": "61a12db2a8b6b4001a9f5a2e",
                 "name": "index.html",
-                "path": "/docs/certificates",
-                "pathname": "/docs/certificates/index.html",
+                "path": "/docs/server-tls",
+                "pathname": "/docs/server-tls/index.html",
                 "src": "{{./docs/index.html}}",
                 "host": [
                     "*"
                 ],
-                "directory": "certificates",
+                "directory": "server-tls",
                 "content-type": "{{content-type}}",
                 "public": "true"
             }

@@ -1,7 +1,7 @@
 {
-  "name": "@cocreate/certificates",
+  "name": "@cocreate/server-tls",
   "version": "1.11.0",
-  "description": "An automated multi-tenant Certificates SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
+  "description": "An automated multi-tenant TLS SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
   "keywords": [
     "cocreate",
     "cocreate-app",
@@ -29,14 +29,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CoCreate-app/CoCreate-certificates.git"
+    "url": "git+https://github.com/CoCreate-app/CoCreate-server-tls.git"
   },
   "author": "CoCreate LLC",
   "license": "AGPL-3.0",
   "bugs": {
-    "url": "https://github.com/CoCreate-app/CoCreate-certificates/issues"
+    "url": "https://github.com/CoCreate-app/CoCreate-server-tls/issues"
   },
-  "homepage": "https://cocreate.app/docs/certificates",
+  "homepage": "https://cocreate.app/docs/server-tls",
   "funding": {
     "type": "GitHub Sponsors ❤",
     "url": "https://github.com/sponsors/CoCreate-app"
