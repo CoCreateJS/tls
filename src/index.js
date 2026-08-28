@@ -9,8 +9,12 @@ import { existsSync, readFileSync } from "node:fs";
 import tls from "node:tls";
 import path from "node:path";
 import dns from "node:dns/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import config from "@cocreate/config";
 import { security, dotNotationToObject } from "@cocreate/utils";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * ACME Directory URLs for Let's Encrypt environments.
@@ -428,32 +432,44 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
                 fs.readFile(certPath, "utf8"),
                 fs.readFile(keyPath, "utf8")
             ]);
+            tls.createSecureContext({ cert, key });
             return { cert, key, domain };
         } catch (e) {
-            console.error(`[@cocreate/server-tls] Error reading local self-signed cert for ${domain}:`, e.message);
+            console.warn(`[@cocreate/server-tls] Replacing invalid local certificate for ${domain}:`, e.message);
         }
     }
 
+    const temporarySuffix = `${process.pid}-${Date.now()}`;
+    const temporaryCertPath = `${certPath}.${temporarySuffix}`;
+    const temporaryKeyPath = `${keyPath}.${temporarySuffix}`;
+
     try {
         await fs.mkdir(targetPath, { recursive: true, mode: 0o700 });
-        let key, cert;
 
-        if (typeof security.createSelfSignedCert === "function") {
-            const certData = security.createSelfSignedCert(domain);
-            key = certData.key || certData.privateKey;
-            cert = certData.cert || certData.certificate;
-        } else {
-            const keyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
-            key = keyPair.privateKey;
-            cert = keyPair.publicKey;
-        }
+        const subjectAltName = domain === "localhost"
+            ? "DNS:localhost,IP:127.0.0.1,IP:::1"
+            : `DNS:${domain}`;
 
-        if (cert && key) {
-            await Promise.all([
-                fs.writeFile(certPath, cert, { mode: 0o600 }),
-                fs.writeFile(keyPath, key, { mode: 0o600 })
-            ]);
-        }
+        await execFileAsync("openssl", [
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
+            "-days", "365", "-subj", `/CN=${domain}`,
+            "-addext", `subjectAltName=${subjectAltName}`,
+            "-keyout", temporaryKeyPath,
+            "-out", temporaryCertPath
+        ]);
+
+        const [cert, key] = await Promise.all([
+            fs.readFile(temporaryCertPath, "utf8"),
+            fs.readFile(temporaryKeyPath, "utf8")
+        ]);
+        tls.createSecureContext({ cert, key });
+
+        await Promise.all([
+            fs.chmod(temporaryCertPath, 0o600),
+            fs.chmod(temporaryKeyPath, 0o600)
+        ]);
+        await fs.rename(temporaryCertPath, certPath);
+        await fs.rename(temporaryKeyPath, keyPath);
 
         const expires = readCertificateExpiry(cert) || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
         certificatesCache.set(domain, { expires, organization_id: null });
@@ -462,6 +478,11 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
     } catch (error) {
         console.error(`[@cocreate/server-tls] Failed to generate local self-signed cert for "${domain}":`, error.message);
         return { cert: null, key: null, domain };
+    } finally {
+        await Promise.allSettled([
+            fs.rm(temporaryCertPath, { force: true }),
+            fs.rm(temporaryKeyPath, { force: true })
+        ]);
     }
 }
 
@@ -484,8 +505,11 @@ export function getHttpsOptions(serverInstance = null) {
         try {
             defaultCert = readFileSync(fullchainPath, "utf8");
             defaultKey = readFileSync(privateKeyPath, "utf8");
+            tls.createSecureContext({ cert: defaultCert, key: defaultKey });
         } catch (err) {
-            console.error("[@cocreate/server-tls] Error reading default localhost certs synchronously:", err.message);
+            defaultCert = null;
+            defaultKey = null;
+            console.error("[@cocreate/server-tls] Invalid default localhost certificate:", err.message);
         }
     }
 
@@ -998,6 +1022,11 @@ export async function init(serverInstance = null, options = {}) {
     if (serverInstance) server = serverInstance;
 
     await loadCertificatesConfig();
+
+    const localCertificate = await ensureLocalSelfSignedCert("localhost");
+    if (!localCertificate.cert || !localCertificate.key) {
+        throw new Error("Unable to provision a valid localhost TLS certificate");
+    }
 
     if (!client || options.accountKey || options.directoryUrl || options.environment) {
         client = new NativeCertificatesClient(options);
