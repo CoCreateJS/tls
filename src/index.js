@@ -9,12 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 import tls from "node:tls";
 import path from "node:path";
 import dns from "node:dns/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import config from "@cocreate/config";
 import { security, dotNotationToObject } from "@cocreate/utils";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * ACME Directory URLs for Let's Encrypt environments.
@@ -27,7 +23,7 @@ const CERTIFICATES_DIRECTORY = Object.freeze({
 /**
  * Default configuration state object for the certificate package.
  */
-export const certificatesConfig = { 
+export const certificatesConfig = {
     cache: true,
     cacheTTL: 10 * 60 * 1000, // 10 minutes
     environment: "production"
@@ -75,7 +71,7 @@ setInterval(() => {
 function normalizeDomain(rawHost) {
     if (!rawHost || typeof rawHost !== "string") return "";
     let domain = rawHost.trim().toLowerCase();
-    
+
     // Strip IPv6 port if formatted as [::1]:8080
     if (domain.startsWith("[")) {
         const closingBracket = domain.indexOf("]");
@@ -83,7 +79,7 @@ function normalizeDomain(rawHost) {
             return domain.substring(1, closingBracket);
         }
     }
-    
+
     // Strip standard IPv4 or hostname port
     const colonIndex = domain.indexOf(":");
     if (colonIndex !== -1) {
@@ -101,11 +97,11 @@ function normalizeDomain(rawHost) {
 export function isLocalHost(rawHost) {
     if (!rawHost || typeof rawHost !== "string") return false;
     const domain = normalizeDomain(rawHost);
-    return domain === "localhost" || 
-           domain === "127.0.0.1" || 
-           domain === "::1" || 
-           domain.endsWith(".local") || 
-           domain.endsWith(".localhost");
+    return domain === "localhost" ||
+        domain === "127.0.0.1" ||
+        domain === "::1" ||
+        domain.endsWith(".local") ||
+        domain.endsWith(".localhost");
 }
 
 /**
@@ -115,15 +111,15 @@ export function isLocalHost(rawHost) {
  */
 function getDirectoryUrl(options = {}) {
     if (options.directoryUrl) return options.directoryUrl;
-    
+
     const env = (
-        options.environment || 
-        options.env || 
+        options.environment ||
+        options.env ||
         (options.production === true ? "production" : options.staging === true ? "staging" : certificatesConfig.environment)
     ).toLowerCase();
 
-    return env === "production" 
-        ? CERTIFICATES_DIRECTORY.LETSENCRYPT_PRODUCTION 
+    return env === "production"
+        ? CERTIFICATES_DIRECTORY.LETSENCRYPT_PRODUCTION
         : CERTIFICATES_DIRECTORY.LETSENCRYPT_STAGING;
 }
 
@@ -134,7 +130,7 @@ function getDirectoryUrl(options = {}) {
 async function loadCertificatesConfig() {
     try {
         const sysConfig = await config.get('certificates');
-        
+
         let dbConfig = null;
         if (server && server.host) {
             dbConfig = await config.query({
@@ -169,7 +165,7 @@ async function loadCertificatesConfig() {
 class NativeCertificatesClient {
     constructor(options = {}) {
         this.directoryUrl = getDirectoryUrl(options);
-        
+
         let accountKey = options.accountKey;
         if (typeof accountKey === "string") {
             accountKey = security.parsePrivateKey(accountKey);
@@ -264,8 +260,8 @@ class NativeCertificatesClient {
                 // Ignore parsing errors for non-JSON ACME error responses
             }
 
-            const isBadNonce = errorData.type === "urn:ietf:params:acme:error:badNonce" || 
-                               errorData.type === "urn:ietf:params:certificates:error:badNonce";
+            const isBadNonce = errorData.type === "urn:ietf:params:acme:error:badNonce" ||
+                errorData.type === "urn:ietf:params:certificates:error:badNonce";
 
             if (isBadNonce && attempt < MAX_NONCE_RETRIES) {
                 await this.fetchNonce();
@@ -432,44 +428,32 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
                 fs.readFile(certPath, "utf8"),
                 fs.readFile(keyPath, "utf8")
             ]);
-            tls.createSecureContext({ cert, key });
             return { cert, key, domain };
         } catch (e) {
-            console.warn(`[@cocreate/server-tls] Replacing invalid local certificate for ${domain}:`, e.message);
+            console.error(`[@cocreate/server-tls] Error reading local self-signed cert for ${domain}:`, e.message);
         }
     }
 
-    const temporarySuffix = `${process.pid}-${Date.now()}`;
-    const temporaryCertPath = `${certPath}.${temporarySuffix}`;
-    const temporaryKeyPath = `${keyPath}.${temporarySuffix}`;
-
     try {
         await fs.mkdir(targetPath, { recursive: true, mode: 0o700 });
+        let key, cert;
 
-        const subjectAltName = domain === "localhost"
-            ? "DNS:localhost,IP:127.0.0.1,IP:::1"
-            : `DNS:${domain}`;
+        if (typeof security.createSelfSignedCert === "function") {
+            const certData = security.createSelfSignedCert(domain);
+            key = certData.key || certData.privateKey;
+            cert = certData.cert || certData.certificate;
+        } else {
+            const keyPair = security.generateKeyPair("rsa", { modulusLength: 2048 });
+            key = keyPair.privateKey;
+            cert = keyPair.publicKey;
+        }
 
-        await execFileAsync("openssl", [
-            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
-            "-days", "365", "-subj", `/CN=${domain}`,
-            "-addext", `subjectAltName=${subjectAltName}`,
-            "-keyout", temporaryKeyPath,
-            "-out", temporaryCertPath
-        ]);
-
-        const [cert, key] = await Promise.all([
-            fs.readFile(temporaryCertPath, "utf8"),
-            fs.readFile(temporaryKeyPath, "utf8")
-        ]);
-        tls.createSecureContext({ cert, key });
-
-        await Promise.all([
-            fs.chmod(temporaryCertPath, 0o600),
-            fs.chmod(temporaryKeyPath, 0o600)
-        ]);
-        await fs.rename(temporaryCertPath, certPath);
-        await fs.rename(temporaryKeyPath, keyPath);
+        if (cert && key) {
+            await Promise.all([
+                fs.writeFile(certPath, cert, { mode: 0o600 }),
+                fs.writeFile(keyPath, key, { mode: 0o600 })
+            ]);
+        }
 
         const expires = readCertificateExpiry(cert) || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
         certificatesCache.set(domain, { expires, organization_id: null });
@@ -478,11 +462,6 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
     } catch (error) {
         console.error(`[@cocreate/server-tls] Failed to generate local self-signed cert for "${domain}":`, error.message);
         return { cert: null, key: null, domain };
-    } finally {
-        await Promise.allSettled([
-            fs.rm(temporaryCertPath, { force: true }),
-            fs.rm(temporaryKeyPath, { force: true })
-        ]);
     }
 }
 
@@ -505,11 +484,8 @@ export function getHttpsOptions(serverInstance = null) {
         try {
             defaultCert = readFileSync(fullchainPath, "utf8");
             defaultKey = readFileSync(privateKeyPath, "utf8");
-            tls.createSecureContext({ cert: defaultCert, key: defaultKey });
         } catch (err) {
-            defaultCert = null;
-            defaultKey = null;
-            console.error("[@cocreate/server-tls] Invalid default localhost certificate:", err.message);
+            console.error("[@cocreate/server-tls] Error reading default localhost certs synchronously:", err.message);
         }
     }
 
@@ -626,7 +602,7 @@ async function load(rawDomain) {
 async function set(rawHost, expires, organization_id, hostKeyPath, cert, key) {
     const domain = normalizeDomain(rawHost);
     const targetPath = hostKeyPath || `${KEY_PATH}${domain}/`;
-    
+
     if (cert && key) {
         try {
             await fs.mkdir(targetPath, { recursive: true, mode: 0o700 });
@@ -725,7 +701,7 @@ async function request(rawHost, hostPosition, hostObject, organization_id, wildc
 
         const readyOrder = await client.pollOrder(order.url, "ready");
         await client.finalizeOrder(readyOrder, domainPrivateKeyPem, domains);
-        
+
         const validOrder = await client.pollOrder(order.url, "valid");
         const cert = await client.downloadCertificate(validOrder.certificate);
         const expires = readCertificateExpiry(cert);
@@ -800,16 +776,16 @@ async function get(rawHost, organization_id) {
                 domainMatched = true;
                 hostPosition = i;
                 hostObject = typeof hostItem === "object" ? hostItem : { name: hostItem };
-                
+
                 const certPem = hostObject.cert;
                 const keyPem = hostObject.key;
 
                 if (certPem && keyPem) {
                     const expires = hostObject.expires || readCertificateExpiry(certPem);
-                    
+
                     if (isValid(expires)) {
                         await set(domain, expires, organization_id, hostKeyPath, certPem, keyPem);
-                        
+
                         if (shouldRenew(expires)) {
                             request(domain, hostPosition, hostObject, organization_id, false).catch(err => {
                                 console.error(`[@cocreate/server-tls] Background renewal failed for "${domain}":`, err.message);
@@ -873,10 +849,10 @@ async function check(rawHost, organization_id, pathname = "") {
                 fs.readFile(privateKeyPath, "utf8")
             ]);
             const expires = readCertificateExpiry(cert);
-            
+
             if (isValid(expires)) {
                 await set(domain, expires, organization_id, hostKeyPath, cert, key);
-                
+
                 if (shouldRenew(expires)) {
                     get(domain, organization_id).catch(err => {
                         console.error(`[@cocreate/server-tls] Background renewal check failed for "${domain}":`, err.message);
@@ -932,18 +908,18 @@ export async function SNICallback(domainName, cb) {
         }
 
         const isValidDomain = await check(cleanDomain);
-        
+
         if (isValidDomain) {
             const credentials = await load(cleanDomain);
             const sslContext = tls.createSecureContext(credentials);
-            
+
             if (certificatesConfig.cache) {
                 secureContextCache.set(cleanDomain, {
                     context: sslContext,
                     timestamp: Date.now()
                 });
             }
-            
+
             if (typeof cb === "function") return cb(null, sslContext);
             return sslContext;
         } else {
@@ -1023,11 +999,6 @@ export async function init(serverInstance = null, options = {}) {
 
     await loadCertificatesConfig();
 
-    const localCertificate = await ensureLocalSelfSignedCert("localhost");
-    if (!localCertificate.cert || !localCertificate.key) {
-        throw new Error("Unable to provision a valid localhost TLS certificate");
-    }
-
     if (!client || options.accountKey || options.directoryUrl || options.environment) {
         client = new NativeCertificatesClient(options);
         await client.init();
@@ -1044,6 +1015,6 @@ export async function init(serverInstance = null, options = {}) {
     };
 }
 
-export default { 
+export default {
     init
 };
