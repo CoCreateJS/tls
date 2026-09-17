@@ -43,6 +43,31 @@ const FAILED_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 // TLS SecureContext cache for fast SNI handshakes
 const secureContextCache = new Map();
+const blockedOrganizations = new Map();
+let balanceListenerBound = false;
+
+function bindBalanceListener() {
+    if (balanceListenerBound) return;
+    balanceListenerBound = true;
+
+    process.on("organization.balance", (data = {}) => {
+        if (!data.organization_id) return;
+        const numericBalance = Number(data.balance);
+        const organizationBalance = typeof data.organizationBalance === "boolean"
+            ? data.organizationBalance
+            : Number.isFinite(numericBalance)
+                ? numericBalance > 0
+                : undefined;
+        if (organizationBalance === false) {
+            blockedOrganizations.set(String(data.organization_id), {
+                balance: data.balance,
+                currency: data.currency
+            });
+        } else if (organizationBalance === true) {
+            blockedOrganizations.delete(String(data.organization_id));
+        }
+    });
+}
 
 // Random jitter (0 to 6 days) to stagger background renewals across instances
 const RENEWAL_JITTER_DAYS = Math.floor(Math.random() * 7);
@@ -892,6 +917,63 @@ async function check(rawHost, organization_id, pathname = "") {
 }
 
 /**
+ * Resolves the request host to its organization and applies the prepaid
+ * balance gate. Process events make balance changes immediate, while CRUD
+ * supplies the initial state after a cold start.
+ */
+async function checkOrganizationAccess(rawHost) {
+    const domain = normalizeDomain(rawHost);
+    if (!domain || isLocalHost(domain)) return { allowed: true };
+    if (!server?.crud?.getOrganization) return { allowed: true };
+
+    let organization = await server.crud.getOrganization({ host: domain });
+    if (organization?.object) {
+        organization = Array.isArray(organization.object)
+            ? organization.object[0]
+            : organization.object;
+    } else if (Array.isArray(organization)) {
+        organization = organization[0];
+    }
+
+    if (!organization?._id) return { allowed: true };
+
+    const organization_id = String(organization._id);
+    const platformOrganizationId = server.organization_id;
+    if (platformOrganizationId && server.crud?.send) {
+        const response = await server.crud.send({
+            method: "object.read",
+            array: "organizations",
+            object: { _id: organization_id },
+            organization_id: platformOrganizationId
+        });
+        const balanceOrganization = Array.isArray(response?.object)
+            ? response.object[0]
+            : response?.object;
+        if (balanceOrganization) {
+            organization = { ...organization, ...balanceOrganization };
+        }
+    }
+
+    const balance = Number(organization.balance);
+    const allowed = !Number.isFinite(balance) || balance > 0;
+    if (!allowed) {
+        blockedOrganizations.set(organization_id, {
+            balance,
+            currency: organization.currency
+        });
+    } else {
+        blockedOrganizations.delete(organization_id);
+    }
+
+    return {
+        allowed,
+        organization_id,
+        balance: Number.isFinite(balance) ? balance : undefined,
+        currency: organization.currency
+    };
+}
+
+/**
  * Asynchronous SNI Callback handler for Node.js TLS Server.
  * @param {string} domainName - Server name indication requested by client.
  * @param {Function} cb - Standard TLS SNICallback callback function.
@@ -996,6 +1078,7 @@ export async function checkCertificate(input, organization_id = null, renewDaysB
  */
 export async function init(serverInstance = null, options = {}) {
     if (serverInstance) server = serverInstance;
+    bindBalanceListener();
 
     await loadCertificatesConfig();
 
@@ -1010,6 +1093,7 @@ export async function init(serverInstance = null, options = {}) {
         SNICallback,
         isLocalHost,
         ensureLocalSelfSignedCert,
+        checkOrganizationAccess,
         getHttpsOptions,
         createHttpsOptions
     };
