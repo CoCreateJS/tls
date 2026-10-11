@@ -692,6 +692,7 @@ async function request(rawHost, hostPosition, hostObject, organization_id, wildc
                     object: {
                         "content-type": "text/plain",
                         directory: "acme-challenge",
+                        headers: { "cache-control": "public, max-age=31536000" },
                         host: [auth.identifier.value],
                         name: httpChallenge.token,
                         organization_id: organization_id,
