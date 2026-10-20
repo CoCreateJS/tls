@@ -5,7 +5,7 @@
  ********************************************************************************/
 
 import fs from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import tls from "node:tls";
 import path from "node:path";
 import dns from "node:dns/promises";
@@ -32,6 +32,11 @@ export const certificatesConfig = {
 let server = null;
 let client = null;
 const KEY_PATH = path.join(process.cwd(), ".certificates") + path.sep;
+
+function logPrefix() {
+    const workerId = server?.workerId || process.env.WORKER_ID;
+    return `[@cocreate/server-tls] ${workerId ? `[WORKER ${workerId}]` : '[MASTER]'}`;
+}
 
 // In-flight request deduplication map (domain -> Promise)
 const inflightRequests = new Map();
@@ -178,7 +183,7 @@ async function loadCertificatesConfig() {
             }
         }
     } catch (error) {
-        console.error("[@cocreate/server-tls] Failed to load certificates configuration:", error.message);
+        console.error(`${logPrefix()} Failed to load certificates configuration:`, error.message);
     }
 
     return certificatesConfig;
@@ -455,7 +460,7 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
             ]);
             return { cert, key, domain };
         } catch (e) {
-            console.error(`[@cocreate/server-tls] Error reading local self-signed cert for ${domain}:`, e.message);
+            console.error(`${logPrefix()} Error reading local self-signed cert for ${domain}:`, e.message);
         }
     }
 
@@ -485,7 +490,7 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
 
         return { cert, key, domain };
     } catch (error) {
-        console.error(`[@cocreate/server-tls] Failed to generate local self-signed cert for "${domain}":`, error.message);
+        console.error(`${logPrefix()} Failed to generate local self-signed cert for "${domain}":`, error.message);
         return { cert: null, key: null, domain };
     }
 }
@@ -493,36 +498,11 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
 /**
  * Generates HTTPS options object for Node.js https/http2 server instances.
  * @param {Object} [serverInstance] - Server context instance.
- * @returns {Object} HTTPS options including default localhost keys and dynamic SNICallback handler.
+ * @returns {Object} HTTPS options with a dynamic SNICallback handler.
  */
 export function getHttpsOptions(serverInstance = null) {
     if (serverInstance) server = serverInstance;
-
-    let defaultKey = null;
-    let defaultCert = null;
-
-    const localhostPath = `${KEY_PATH}localhost/`;
-    const fullchainPath = `${localhostPath}fullchain.pem`;
-    const privateKeyPath = `${localhostPath}private-key.pem`;
-
-    if (existsSync(fullchainPath) && existsSync(privateKeyPath)) {
-        try {
-            defaultCert = readFileSync(fullchainPath, "utf8");
-            defaultKey = readFileSync(privateKeyPath, "utf8");
-        } catch (err) {
-            console.error("[@cocreate/server-tls] Error reading default localhost certs synchronously:", err.message);
-        }
-    }
-
-    if (!defaultCert || !defaultKey) {
-        ensureLocalSelfSignedCert("localhost").catch(err => {
-            console.error("[@cocreate/server-tls] Background local self-signed cert generation failed:", err.message);
-        });
-    }
-
     return {
-        key: defaultKey,
-        cert: defaultCert,
         SNICallback: (domainName, cb) => SNICallback(domainName, cb)
     };
 }
@@ -616,7 +596,7 @@ async function load(rawDomain) {
         ]);
         return { key, cert };
     } catch (error) {
-        console.error(`[@cocreate/server-tls] Error loading SSL certificates for domain "${domain}":`, error.message);
+        console.error(`${logPrefix()} Error loading SSL certificates for domain "${domain}":`, error.message);
         throw error;
     }
 }
@@ -631,12 +611,19 @@ async function set(rawHost, expires, organization_id, hostKeyPath, cert, key) {
     if (cert && key) {
         try {
             await fs.mkdir(targetPath, { recursive: true, mode: 0o700 });
-            await Promise.all([
-                fs.writeFile(`${targetPath}fullchain.pem`, cert, { mode: 0o600 }),
-                fs.writeFile(`${targetPath}private-key.pem`, key, { mode: 0o600 })
-            ]);
+            const temporaryPath = await fs.mkdtemp(`${targetPath}.tmp-`);
+            try {
+                await Promise.all([
+                    fs.writeFile(`${temporaryPath}/fullchain.pem`, cert, { mode: 0o600 }),
+                    fs.writeFile(`${temporaryPath}/private-key.pem`, key, { mode: 0o600 })
+                ]);
+                await fs.rename(`${temporaryPath}/fullchain.pem`, `${targetPath}fullchain.pem`);
+                await fs.rename(`${temporaryPath}/private-key.pem`, `${targetPath}private-key.pem`);
+            } finally {
+                await fs.rm(temporaryPath, { recursive: true, force: true });
+            }
         } catch (err) {
-            console.error(`[@cocreate/server-tls] Failed writing certificates to disk for "${domain}":`, err.message);
+            console.error(`${logPrefix()} Failed writing certificates to disk for "${domain}":`, err.message);
         }
     }
 
@@ -644,7 +631,7 @@ async function set(rawHost, expires, organization_id, hostKeyPath, cert, key) {
         try {
             server.ingress.createServer(domain);
         } catch (err) {
-            console.error(`[@cocreate/server-tls] Failed calling ingress.createServer for "${domain}":`, err.message);
+            console.error(`${logPrefix()} Failed calling ingress.createServer for "${domain}":`, err.message);
         }
     }
 
@@ -720,7 +707,7 @@ async function request(rawHost, hostPosition, hostObject, organization_id, wildc
                         array: "files",
                         object: { _id: challenge_id },
                         organization_id
-                    }).catch(err => console.error("[@cocreate/server-tls] Cleanup challenge file error:", err.message));
+                    }).catch(err => console.error(`${logPrefix()} Cleanup challenge file error:`, err.message));
                 }
             }
         }
@@ -744,12 +731,12 @@ async function request(rawHost, hostPosition, hostObject, organization_id, wildc
                     [`host[${hostPosition}]`]: { ...hostObject, name: domain, cert, key: domainPrivateKeyPem, expires }
                 },
                 organization_id
-            }).catch(err => console.error(`[@cocreate/server-tls] Database update failed for host "${domain}":`, err.message));
+            }).catch(err => console.error(`${logPrefix()} Database update failed for host "${domain}":`, err.message));
         }
 
         return true;
     } catch (error) {
-        console.error(`[@cocreate/server-tls] Certificate creation failed for host "${domain}": ${error.message}`);
+        console.error(`${logPrefix()} Certificate creation failed for host "${domain}": ${error.message}`);
         return false;
     }
 }
@@ -763,7 +750,7 @@ async function get(rawHost, organization_id) {
     let hostPosition, hostObject;
 
     if (!server || !server.crud) {
-        console.error(`[@cocreate/server-tls] Aborting certificate lookup for host "${domain}": Server CRUD interface unavailable.`);
+        console.error(`${logPrefix()} Aborting certificate lookup for host "${domain}": Server CRUD interface unavailable.`);
         return false;
     }
 
@@ -771,7 +758,7 @@ async function get(rawHost, organization_id) {
     try {
         organization = await server.crud.getOrganization({ host: domain, organization_id });
     } catch (error) {
-        console.error(`[@cocreate/server-tls] CRUD error fetching organization for host "${domain}":`, error.message);
+        console.error(`${logPrefix()} CRUD error fetching organization for host "${domain}":`, error.message);
         return false;
     }
 
@@ -783,7 +770,7 @@ async function get(rawHost, organization_id) {
 
     if (!organization || organization.error) {
         if (organization?.error) {
-            console.error(`[@cocreate/server-tls] Organization query error for host "${domain}":`, organization.error);
+            console.error(`${logPrefix()} Organization query error for host "${domain}":`, organization.error);
         }
         return false;
     }
@@ -814,7 +801,7 @@ async function get(rawHost, organization_id) {
 
                         if (shouldRenew(expires)) {
                             request(domain, hostPosition, hostObject, organization_id, false).catch(err => {
-                                console.error(`[@cocreate/server-tls] Background renewal failed for "${domain}":`, err.message);
+                                console.error(`${logPrefix()} Background renewal failed for "${domain}":`, err.message);
                             });
                         }
                         return true;
@@ -877,17 +864,17 @@ async function check(rawHost, organization_id, pathname = "") {
             const expires = readCertificateExpiry(cert);
 
             if (isValid(expires)) {
-                await set(domain, expires, organization_id, hostKeyPath, cert, key);
+                await set(domain, expires, organization_id, hostKeyPath);
 
                 if (shouldRenew(expires)) {
                     get(domain, organization_id).catch(err => {
-                        console.error(`[@cocreate/server-tls] Background renewal check failed for "${domain}":`, err.message);
+                        console.error(`${logPrefix()} Background renewal check failed for "${domain}":`, err.message);
                     });
                 }
                 return true;
             }
         } catch (e) {
-            console.error(`[@cocreate/server-tls] Error reading local certificate for ${domain}:`, e.message);
+            console.error(`${logPrefix()} Error reading local certificate for ${domain}:`, e.message);
         }
     }
 
@@ -903,7 +890,7 @@ async function check(rawHost, organization_id, pathname = "") {
                 }
                 return result;
             } catch (err) {
-                console.error(`[@cocreate/server-tls] Exception during certificate resolution for "${domain}":`, err.message);
+                console.error(`${logPrefix()} Exception during certificate resolution for "${domain}":`, err.message);
                 failedHosts.set(domain, Date.now());
                 throw err;
             } finally {
@@ -1011,7 +998,7 @@ export async function SNICallback(domainName, cb) {
             throw err;
         }
     } catch (error) {
-        console.error(`[@cocreate/server-tls] Error in SNI callback for domain "${domainName}":`, error.message);
+        console.error(`${logPrefix()} Error in SNI callback for domain "${domainName}":`, error.message);
         if (typeof cb === "function") return cb(error);
         throw error;
     }
@@ -1049,7 +1036,7 @@ export async function checkCertificate(input, organization_id = null, renewDaysB
                 return { valid: true, domain, cert, key, expires };
             }
         } catch (e) {
-            console.error(`[@cocreate/server-tls] Error reading certificate for ${domain}:`, e.message);
+            console.error(`${logPrefix()} Error reading certificate for ${domain}:`, e.message);
         }
     }
 
@@ -1065,7 +1052,7 @@ export async function checkCertificate(input, organization_id = null, renewDaysB
 
             return { valid, domain, cert, key, expires };
         } catch (e) {
-            console.error(`[@cocreate/server-tls] Error reading certificate for ${domain}:`, e.message);
+            console.error(`${logPrefix()} Error reading certificate for ${domain}:`, e.message);
         }
     }
 
