@@ -22,6 +22,28 @@
   "publishConfig": {
     "access": "public"
   },
+  "cocreate": {
+    "environment": [
+      "server"
+    ],
+    "interface": {
+      "schemaVersion": 1,
+      "summary": "An automated multi-tenant TLS SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
+      "source": "src/index.js",
+      "api": {
+        "exports": [
+          "SNICallback",
+          "certificatesConfig",
+          "checkCertificate",
+          "createHttpsOptions",
+          "ensureLocalSelfSignedCert",
+          "getHttpsOptions",
+          "init",
+          "isLocalHost"
+        ]
+      }
+    }
+  },
   "scripts": {
     "start": "webpack --config webpack.config.js",
     "build": "webpack --mode=production --config webpack.config.js",
