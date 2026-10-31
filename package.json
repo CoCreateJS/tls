@@ -51,14 +51,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CoCreate-app/CoCreate-server-tls.git"
+    "url": "git+https://github.com/CoCreateJS/CoCreate-server-tls.git"
   },
   "author": "CoCreate LLC",
   "license": "AGPL-3.0",
   "bugs": {
-    "url": "https://github.com/CoCreate-app/CoCreate-server-tls/issues"
+    "url": "https://github.com/CoCreateJS/CoCreate-server-tls/issues"
   },
-  "homepage": "https://cocreate.app/docs/server-tls",
+  "homepage": "https://CoCreateJS.com/docs/server-tls",
   "funding": {
     "type": "GitHub Sponsors ❤",
     "url": "https://github.com/sponsors/CoCreate-app"

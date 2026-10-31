@@ -108,7 +108,7 @@ if (operational) {
 
 ## How to Contribute
 
-We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreate-app/CoCreate-server-tls/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreate-app/CoCreate-server-tls/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
+We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreateJS/CoCreate-server-tls/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreateJS/CoCreate-server-tls/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
 
 For broader system configurations and API guides, please visit our [CoCreate TLS Documentation](https://cocreatejs.com/docs/server-tls).
 
