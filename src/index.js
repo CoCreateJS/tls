@@ -22,6 +22,8 @@ const CERTIFICATES_DIRECTORY = Object.freeze({
 
 /**
  * Default configuration state object for the certificate package.
+ * @public
+ * @environment server
  */
 export const certificatesConfig = {
     cache: true,
@@ -97,6 +99,8 @@ setInterval(() => {
  * Standardizes host headers by stripping ports, handling IPv6 brackets, and lowercasing.
  * @param {string} rawHost - Raw host string from HTTP/TLS headers.
  * @returns {string} Normalized domain name.
+ * @private
+ * @environment server
  */
 function normalizeDomain(rawHost) {
     if (!rawHost || typeof rawHost !== "string") return "";
@@ -123,6 +127,8 @@ function normalizeDomain(rawHost) {
  * Checks whether a given host or IP address represents a local loopback interface.
  * @param {string} rawHost - Target host or IP string.
  * @returns {boolean} True if host is localhost/loopback.
+ * @public
+ * @environment server
  */
 export function isLocalHost(rawHost) {
     if (!rawHost || typeof rawHost !== "string") return false;
@@ -138,6 +144,8 @@ export function isLocalHost(rawHost) {
  * Computes directory URL based on options or configuration state.
  * @param {Object} options - Configuration options.
  * @returns {string} ACME Directory URL.
+ * @private
+ * @environment server
  */
 function getDirectoryUrl(options = {}) {
     if (options.directoryUrl) return options.directoryUrl;
@@ -156,6 +164,8 @@ function getDirectoryUrl(options = {}) {
 /**
  * Loads dynamic system and database configurations for certificates.
  * @returns {Promise<Object>} Updated certificates configuration.
+ * @private
+ * @environment server
  */
 async function loadCertificatesConfig() {
     try {
@@ -216,7 +226,9 @@ class NativeCertificatesClient {
 
     /**
      * Initializes the client by fetching directory endpoints and initial anti-replay nonce.
-     */
+ * @public
+ * @environment server
+ */
     async init() {
         const res = await fetch(this.directoryUrl);
         if (!res.ok) {
@@ -228,7 +240,9 @@ class NativeCertificatesClient {
 
     /**
      * Fetches a fresh anti-replay nonce from the ACME server.
-     */
+ * @private
+ * @environment server
+ */
     async fetchNonce() {
         if (!this.directory || !this.directory.newNonce) {
             throw new Error("ACME directory not initialized");
@@ -247,7 +261,9 @@ class NativeCertificatesClient {
      * @param {Object|string} payload - Request payload object or empty string.
      * @param {number} attempt - Current retry count.
      * @returns {Promise<Response>} Fetch Response object.
-     */
+ * @private
+ * @environment server
+ */
     async postJws(url, payload, attempt = 0) {
         const MAX_NONCE_RETRIES = 3;
 
@@ -304,7 +320,9 @@ class NativeCertificatesClient {
 
     /**
      * Creates or registers an ACME account.
-     */
+ * @private
+ * @environment server
+ */
     async createAccount(options = {}) {
         const payload = {
             termsOfServiceAgreed: options.termsOfServiceAgreed ?? true,
@@ -322,7 +340,9 @@ class NativeCertificatesClient {
 
     /**
      * Initiates a new certificate order for given hostnames.
-     */
+ * @private
+ * @environment server
+ */
     async createOrder(domains) {
         const identifiers = domains.map(domain => ({ type: "dns", value: domain }));
         const res = await this.postJws(this.directory.newOrder, { identifiers });
@@ -338,7 +358,9 @@ class NativeCertificatesClient {
 
     /**
      * Retrieves authorization objects associated with an order.
-     */
+ * @private
+ * @environment server
+ */
     async getAuthorizations(order) {
         const authorizations = [];
         for (const authUrl of order.authorizations) {
@@ -351,14 +373,18 @@ class NativeCertificatesClient {
 
     /**
      * Calculates key authorization string for HTTP-01 or DNS-01 challenges.
-     */
+ * @private
+ * @environment server
+ */
     getKeyAuthorization(token) {
         return `${token}.${this.jwkThumbprint}`;
     }
 
     /**
      * Notifies ACME server to perform challenge validation.
-     */
+ * @private
+ * @environment server
+ */
     async verifyChallenge(challengeUrl) {
         const res = await this.postJws(challengeUrl, {});
         if (!res.ok) {
@@ -369,7 +395,9 @@ class NativeCertificatesClient {
 
     /**
      * Polls authorization status until valid or failed.
-     */
+ * @private
+ * @environment server
+ */
     async pollAuthorization(authUrl, maxAttempts = 15, delayMs = 2000) {
         for (let i = 0; i < maxAttempts; i++) {
             const res = await this.postJws(authUrl, "");
@@ -395,7 +423,9 @@ class NativeCertificatesClient {
 
     /**
      * Polls order status until ready or valid.
-     */
+ * @private
+ * @environment server
+ */
     async pollOrder(orderUrl, targetStatus = "ready", maxAttempts = 10, delayMs = 2000) {
         for (let i = 0; i < maxAttempts; i++) {
             const res = await this.postJws(orderUrl, "");
@@ -417,7 +447,9 @@ class NativeCertificatesClient {
 
     /**
      * Submits PKCS#10 CSR to finalize certificate order.
-     */
+ * @private
+ * @environment server
+ */
     async finalizeOrder(order, domainPrivateKey, domains) {
         const csrBase64Url = security.createCSR(domainPrivateKey, domains);
         const res = await this.postJws(order.finalize, { csr: csrBase64Url });
@@ -431,7 +463,9 @@ class NativeCertificatesClient {
 
     /**
      * Downloads signed PEM certificate chain from ACME endpoint.
-     */
+ * @private
+ * @environment server
+ */
     async downloadCertificate(certificateUrl) {
         const res = await this.postJws(certificateUrl, "");
         if (!res.ok) {
@@ -445,6 +479,8 @@ class NativeCertificatesClient {
  * Ensures a valid local self-signed certificate exists for local development or loopback testing.
  * @param {string} rawHost - Target host name (defaults to 'localhost').
  * @returns {Promise<{cert: string, key: string, domain: string}>} Certificate and key pair.
+ * @public
+ * @environment server
  */
 export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
     const domain = normalizeDomain(rawHost) || "localhost";
@@ -499,18 +535,32 @@ export async function ensureLocalSelfSignedCert(rawHost = "localhost") {
  * Generates HTTPS options object for Node.js https/http2 server instances.
  * @param {Object} [serverInstance] - Server context instance.
  * @returns {Object} HTTPS options with a dynamic SNICallback handler.
+ * @public
+ * @environment server
  */
 export function getHttpsOptions(serverInstance = null) {
     if (serverInstance) server = serverInstance;
     return {
+        /**
+         *
+ * @public
+ * @environment server
+ */
         SNICallback: (domainName, cb) => SNICallback(domainName, cb)
     };
 }
 
+/**
+ *
+ * @public
+ * @environment server
+ */
 export const createHttpsOptions = getHttpsOptions;
 
 /**
  * Performs pre-flight DNS A/AAAA check for domain resolution.
+ * @private
+ * @environment server
  */
 async function verifyDnsBeforeCertificates(domain) {
     try {
@@ -526,6 +576,8 @@ async function verifyDnsBeforeCertificates(domain) {
 
 /**
  * Parses expiration date from PEM certificate.
+ * @private
+ * @environment server
  */
 function readCertificateExpiry(certPem) {
     try {
@@ -544,6 +596,8 @@ function readCertificateExpiry(certPem) {
 
 /**
  * Checks if expiration timestamp is still in the future.
+ * @private
+ * @environment server
  */
 function isValid(expires) {
     if (!expires) return false;
@@ -554,6 +608,8 @@ function isValid(expires) {
 
 /**
  * Determines if a certificate is due for renewal based on threshold and random jitter.
+ * @private
+ * @environment server
  */
 function shouldRenew(expires) {
     if (!expires) return true;
@@ -567,6 +623,8 @@ function shouldRenew(expires) {
 
 /**
  * Validates whether certificate is active and not within expiration buffer window.
+ * @private
+ * @environment server
  */
 function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
     try {
@@ -585,6 +643,8 @@ function isCertificateValid(certPem, renewDaysBeforeExpiry = 30) {
  * Asynchronously loads private key and certificate chain from local disk storage.
  * @param {string} rawDomain - Target domain name.
  * @returns {Promise<{key: Buffer, cert: Buffer}>} Certificate credentials object.
+ * @private
+ * @environment server
  */
 async function load(rawDomain) {
     const domain = normalizeDomain(rawDomain);
@@ -603,6 +663,8 @@ async function load(rawDomain) {
 
 /**
  * Asynchronously writes certificate credentials to local disk storage and notifies server.
+ * @private
+ * @environment server
  */
 async function set(rawHost, expires, organization_id, hostKeyPath, cert, key) {
     const domain = normalizeDomain(rawHost);
@@ -641,6 +703,8 @@ async function set(rawHost, expires, organization_id, hostKeyPath, cert, key) {
 
 /**
  * Issues ACME certificate workflow for target host.
+ * @private
+ * @environment server
  */
 async function request(rawHost, hostPosition, hostObject, organization_id, wildcard = false) {
     const domain = normalizeDomain(rawHost);
@@ -743,6 +807,8 @@ async function request(rawHost, hostPosition, hostObject, organization_id, wildc
 
 /**
  * Fetches certificate record from organization store or requests dynamic provision.
+ * @private
+ * @environment server
  */
 async function get(rawHost, organization_id) {
     const domain = normalizeDomain(rawHost);
@@ -826,6 +892,8 @@ async function get(rawHost, organization_id) {
 
 /**
  * Primary check function for validating, reading, or ordering dynamic certificates.
+ * @private
+ * @environment server
  */
 async function check(rawHost, organization_id, pathname = "") {
     if (!rawHost) return false;
@@ -908,6 +976,8 @@ async function check(rawHost, organization_id, pathname = "") {
  * Resolves the request host to its organization and applies the prepaid
  * balance gate. Process events make balance changes immediate, while CRUD
  * supplies the initial state after a cold start.
+ * @private
+ * @environment server
  */
 async function checkOrganizationAccess(rawHost) {
     const domain = normalizeDomain(rawHost);
@@ -965,6 +1035,8 @@ async function checkOrganizationAccess(rawHost) {
  * Asynchronous SNI Callback handler for Node.js TLS Server.
  * @param {string} domainName - Server name indication requested by client.
  * @param {Function} cb - Standard TLS SNICallback callback function.
+ * @public
+ * @environment server
  */
 export async function SNICallback(domainName, cb) {
     try {
@@ -1006,6 +1078,8 @@ export async function SNICallback(domainName, cb) {
 
 /**
  * Public utility to inspect certificate validity or domain status.
+ * @public
+ * @environment server
  */
 export async function checkCertificate(input, organization_id = null, renewDaysBeforeExpiry = 30) {
     if (!input || typeof input !== "string") {
@@ -1063,6 +1137,8 @@ export async function checkCertificate(input, organization_id = null, renewDaysB
  * Initializes the certificate manager with system settings and client instance.
  * @param {Object} serverInstance - Global application server instance.
  * @param {Object} options - Custom ACME client configuration options.
+ * @public
+ * @environment server
  */
 export async function init(serverInstance = null, options = {}) {
     if (serverInstance) server = serverInstance;
@@ -1090,3 +1166,10 @@ export async function init(serverInstance = null, options = {}) {
 export default {
     init
 };
+
+/**
+ * An automated multi-tenant TLS SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.
+ *
+ * @module server-tls
+ * @environment server
+ */
