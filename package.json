@@ -1,6 +1,6 @@
 {
   "name": "@cocreate/tls",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "description": "An automated multi-tenant TLS SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.",
   "keywords": [
     "cocreate",

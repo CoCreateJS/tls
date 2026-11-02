@@ -1,3 +1,15 @@
+# [2.0.0](https://github.com/CoCreateJS/tls/compare/v1.6.0...v2.0.0) (2026-11-02)
+
+
+### chore
+
+* record package identity migration as breaking ([6815f53](https://github.com/CoCreateJS/tls/commit/6815f533512b4b6fe89470f485c46763c2e2ce9b))
+
+
+### BREAKING CHANGES
+
+* Consumers must install @cocreate/tls and use the CoCreateJS repository identity; previous package and repository identities are no longer supported.
+
 # [1.6.0](https://github.com/CoCreateJS/tls/compare/v1.5.1...v1.6.0) (2026-11-02)
 
 
