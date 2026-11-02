@@ -1,19 +1,19 @@
-# Contributing to CoCreate-server-tls
+# Contributing to CoCreate-tls
 
-This project is work of [many contributors](https://github.com/CoCreateJS/CoCreate-server-tls/graphs/contributors).
-You're encouraged to submit [pull requests](https://github.com/CoCreateJS/CoCreate-server-tls/pulls),
-[propose features and discuss issues](https://github.com/CoCreateJS/CoCreate-server-tls/issues).
+This project is work of [many contributors](https://github.com/CoCreateJS/tls/graphs/contributors).
+You're encouraged to submit [pull requests](https://github.com/CoCreateJS/tls/pulls),
+[propose features and discuss issues](https://github.com/CoCreateJS/tls/issues).
 
 In the examples below, substitute your Github username for `contributor` in URLs.
 
 ## Fork the Project
 
-Fork the [project on Github](https://github.com/CoCreateJS/CoCreate-server-tls) and check out your copy.
+Fork the [project on Github](https://github.com/CoCreateJS/tls) and check out your copy.
 
 ```
-git clone https://github.com/contributor/CoCreate-server-tls.git
-cd CoCreate-server-tls
-git remote add upstream https://github.com/CoCreateJS/CoCreate-server-tls.git
+git clone https://github.com/contributor/tls.git
+cd tls
+git remote add upstream https://github.com/CoCreateJS/tls.git
 ```
 
 ## Create a Topic Branch
@@ -70,7 +70,7 @@ git push origin my-feature-branch
 
 ## Make a Pull Request
 
-Go to [https://github.com/CoCreateJS/CoCreate-server-tls](https://github.com/CoCreateJS/CoCreate-server-tls) and select your feature branch.
+Go to [https://github.com/CoCreateJS/tls](https://github.com/CoCreateJS/tls) and select your feature branch.
 Click the 'Pull Request' button and fill out the form. Pull requests are usually reviewed within a few days.
 
 ## Rebase

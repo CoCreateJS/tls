@@ -37,7 +37,7 @@ const KEY_PATH = path.join(process.cwd(), ".certificates") + path.sep;
 
 function logPrefix() {
     const workerId = server?.workerId || process.env.WORKER_ID;
-    return `[@cocreate/server-tls] ${workerId ? `[WORKER ${workerId}]` : '[MASTER]'}`;
+    return `[@cocreate/tls] ${workerId ? `[WORKER ${workerId}]` : '[MASTER]'}`;
 }
 
 // In-flight request deduplication map (domain -> Promise)
@@ -1065,7 +1065,7 @@ export async function SNICallback(domainName, cb) {
             if (typeof cb === "function") return cb(null, sslContext);
             return sslContext;
         } else {
-            const err = new Error(`[@cocreate/server-tls] Unauthorized secure request for domain: ${cleanDomain}`);
+            const err = new Error(`[@cocreate/tls] Unauthorized secure request for domain: ${cleanDomain}`);
             if (typeof cb === "function") return cb(err);
             throw err;
         }
@@ -1170,6 +1170,6 @@ export default {
 /**
  * An automated multi-tenant TLS SSL/TLS certificate provisioning and management wrapper for CoCreate, featuring distributed http-01 challenge syncing via custom CRUD gateways, automatic 2048-bit RSA key generation, staggered renewal windows, and hot proxy re-initialization.
  *
- * @module server-tls
+ * @module tls
  * @environment server
  */

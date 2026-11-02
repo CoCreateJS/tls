@@ -1,6 +1,6 @@
-Here is the accurately updated, tailored README for `@cocreate/server-tls` based directly on your provided source code implementation. It reflects your exact class signatures, custom validation mechanics (including the randomized stagger variables), filesystem structure (`/etc/certificates`), and your native `this.crud` database/file injection flows.
+Here is the accurately updated, tailored README for `@cocreate/tls` based directly on your provided source code implementation. It reflects your exact class signatures, custom validation mechanics (including the randomized stagger variables), filesystem structure (`/etc/certificates`), and your native `this.crud` database/file injection flows.
 
-# @cocreate/server-tls
+# @cocreate/tls
 
 An automated, multi-tenant TLS (Automated Certificate Management Environment) client and automated SSL/TLS provisioning wrapper built on top of `certificates-client`. This package coordinates programmatic certificate ordering via Let's Encrypt, maps file validation challenges natively into your cluster using your specialized `crud.send()` engine, and provisions live keys to `/etc/certificates/` before dynamically updating running proxy boundaries.
 
@@ -31,7 +31,7 @@ An automated, multi-tenant TLS (Automated Certificate Management Environment) cl
 ## Installation
 
 ```bash
-npm install @cocreate/server-tls
+npm install @cocreate/tls
 
 ```
 
@@ -44,7 +44,7 @@ npm install @cocreate/server-tls
 Inject your cluster's routing `proxy` interface and core database `crud` middleware service layer right into the instance constructor context:
 
 ```javascript
-const CoCreateCertificates = require('@cocreate/server-tls');
+const CoCreateCertificates = require('@cocreate/tls');
 
 const proxyInstance = {
   createServer: (host) => console.log(`Hot-reloaded server certificates for: ${host}`)
@@ -108,9 +108,9 @@ if (operational) {
 
 ## How to Contribute
 
-We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreateJS/CoCreate-server-tls/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreateJS/CoCreate-server-tls/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
+We encourage contribution to our libraries (you might even score some nifty swag), please see our [CONTRIBUTING.md](https://github.com/CoCreateJS/tls/blob/master/CONTRIBUTING.md) guide for details. If you encounter any bugs or wish to make feature requests, please submit an issue on our [GitHub Issues](https://github.com/CoCreateJS/tls/issues) tracker. We want this library to be community-driven, and CoCreate led. We need your help to realize this goal.
 
-For broader system configurations and API guides, please visit our [CoCreate TLS Documentation](https://cocreatejs.com/docs/server-tls).
+For broader system configurations and API guides, please visit our [CoCreate TLS Documentation](https://cocreatejs.com/docs/tls).
 
 ---
 
