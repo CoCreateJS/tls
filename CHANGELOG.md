@@ -1,3 +1,30 @@
+# [1.6.0](https://github.com/CoCreateJS/tls/compare/v1.5.1...v1.6.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* add Deno specific entries to .gitignore ([f77a858](https://github.com/CoCreateJS/tls/commit/f77a85841ee9fbfbbc503bc765742454cef5e412))
+* bump versions ([c5b256d](https://github.com/CoCreateJS/tls/commit/c5b256dd17982f3a12ab6ab80cef84a7e6c26101))
+* correct keyPath to include a leading dot for certificates directory ([8ccb6f1](https://github.com/CoCreateJS/tls/commit/8ccb6f1063dfd61240ecd12f34c2591123a49ee8))
+* regenerate invalid local TLS certificates ([72de9da](https://github.com/CoCreateJS/tls/commit/72de9dabbed730bd2ecb7c2f5d2c2c89950fd594))
+* remove exports field from package.json ([5c8c6ae](https://github.com/CoCreateJS/tls/commit/5c8c6ae6769d20c497e01362f9e3d3039f6593ff))
+* remove trailing slash from node_modules entry in .gitignore ([a6fdc97](https://github.com/CoCreateJS/tls/commit/a6fdc973fdc481b62ff2e35c7a65bf8d96731de1))
+* update GitHub Actions to use latest versions and sync package.json description ([ed05aff](https://github.com/CoCreateJS/tls/commit/ed05aff305d2e884c1dcc96be03d88dfb7a0b9b4))
+* update organization_id handling for dynamic resolution in ACME requests ([27738bb](https://github.com/CoCreateJS/tls/commit/27738bb6b42ce9d400e3be29fb268dc22172f56b))
+
+
+### Features
+
+* add @cocreate/config as a dependency and refactor certificate management logic ([28f251b](https://github.com/CoCreateJS/tls/commit/28f251b9e8006ed85a4d20d00bca3d80a629b08d))
+* add @cocreate/utils as a dependency and refactor CSR generation to use security utilities ([18e853d](https://github.com/CoCreateJS/tls/commit/18e853d57257405564074a871b8a797f79e3fda7))
+* add webpack configuration and self-cleaning bundle plugin ([ced8fe2](https://github.com/CoCreateJS/tls/commit/ced8fe2f97a6962f9f3e4120d6e4d56df49334e7))
+* bumped all dependency versions ([0d536c6](https://github.com/CoCreateJS/tls/commit/0d536c65a21463a50527cfae52c7f42602a79f94))
+* overhaul ACME client implementation and remove webpack configuration ([de9b685](https://github.com/CoCreateJS/tls/commit/de9b685ba2acff13602f8887726bb9d17e52b52e))
+* refactor certificate management with async file operations and enhanced error handling ([028d1fc](https://github.com/CoCreateJS/tls/commit/028d1fcc69a94e649fa559f308e6ead52cfc14bf))
+* remove manual workflow configuration ([ae0e6a8](https://github.com/CoCreateJS/tls/commit/ae0e6a8ec75332779d985b30d74b9403daa84ceb))
+* rename ACME to Certificates and update related references ([92422df](https://github.com/CoCreateJS/tls/commit/92422df33e9f516b9ae08a493c017011c1f19238))
+* update Let's Encrypt directory URLs to the latest API endpoints ([dcb1959](https://github.com/CoCreateJS/tls/commit/dcb1959bb3355ffb55195d4347f8359d471494d9))
+
 ## [1.5.1](https://github.com/CoCreateJS/tls/compare/v1.5.0...v1.5.1) (2026-07-19)
 
 
