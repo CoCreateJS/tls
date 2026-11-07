@@ -1,3 +1,10 @@
+## [2.0.2](https://github.com/CoCreateJS/tls/compare/v2.0.1...v2.0.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* bump CoCreate dependency versions ([faea3ea](https://github.com/CoCreateJS/tls/commit/faea3ea3a6604b88075a2f2e55680e42524ba801))
+
 ## [2.0.1](https://github.com/CoCreateJS/tls/compare/v2.0.0...v2.0.1) (2026-11-05)
 
 
